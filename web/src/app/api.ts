@@ -31,6 +31,7 @@ export interface Pr {
   group: Group;
   running: boolean;
   batch: 'none' | 'open' | 'closable';
+  waitingForBuild: boolean;
   counts: { proposals: number; questions: number; pending: number; findings: number };
 }
 

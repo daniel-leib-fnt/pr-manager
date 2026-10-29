@@ -57,3 +57,14 @@ test('threads are resolved when fixed or skipped with a reason', () => {
   assert.equal(shouldResolve(comment({ state: 'skipped' })), false);
   assert.equal(shouldResolve(comment({ state: 'fixed', kind: 'issue_comment', thread_id: null })), false);
 });
+
+test('reviews wait for a green build', async () => {
+  const { buildGreen, runnable } = await import('../server/batch.ts');
+  assert.equal(buildGreen({ check_state: 'SUCCESS' }), true);
+  assert.equal(buildGreen({ check_state: null }), true);
+  for (const s of ['FAILURE', 'ERROR', 'PENDING', 'EXPECTED']) assert.equal(buildGreen({ check_state: s }), false, s);
+  assert.equal(runnable({ check_state: 'FAILURE' }, 'review'), false);
+  assert.equal(runnable({ check_state: 'PENDING' }, 'followup_review'), false);
+  assert.equal(runnable({ check_state: 'FAILURE' }, 'answers'), true);
+  assert.equal(runnable({ check_state: 'FAILURE' }, 'comments'), true);
+});

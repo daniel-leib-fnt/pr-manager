@@ -3,7 +3,7 @@ import { type IncomingMessage, type ServerResponse, createServer } from 'node:ht
 import { extname, join, normalize } from 'node:path';
 import { getSessionMessages } from '@anthropic-ai/claude-agent-sdk';
 import { type ReviewInput, type SubmitInput, addInstruction, submitDecisions, submitReview } from './actions.ts';
-import { batchStatus } from './batch.ts';
+import { batchStatus, buildGreen, runnable } from './batch.ts';
 import { config } from './config.ts';
 import type { Db, Pr } from './db.ts';
 import { findingUrl } from './github.ts';
@@ -20,7 +20,7 @@ export function groupOf(db: Db, pr: Pr): Group {
   const comments = db.comments(pr.id);
   const questions = db.questions(pr.id);
   if (comments.some((c) => c.state === 'proposal') || questions.some((q) => q.state === 'open') || pr.review_state === 'draft') return 'needs_me';
-  if (db.workItems(pr.id).some((w) => w.state === 'queued')) return 'queued';
+  if (db.workItems(pr.id).some((w) => w.state === 'queued' && runnable(pr, w.kind))) return 'queued';
   if (pr.review_out_of_date) return 'out_of_date';
   return 'waiting';
 }
@@ -37,6 +37,7 @@ function summary(db: Db, pr: Pr, runningId: number | undefined) {
       pending: comments.filter((c) => c.state === 'fixed' || c.state === 'skipped').length,
       findings: db.findings(pr.id).filter((f) => f.state === 'draft').length,
     },
+    waitingForBuild: pr.role === 'review' && pr.review_state !== 'submitted' && !pr.is_draft && !buildGreen(pr),
     batch: pr.role === 'own' ? batchStatus(comments, db.questions(pr.id), db.workItems(pr.id)) : 'none',
   };
 }

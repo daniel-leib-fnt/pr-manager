@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { type Options, type SDKResultMessage, query } from '@anthropic-ai/claude-agent-sdk';
 import { AGENT_TOOL_SERVER, createAgentTools } from './agent-tools.ts';
 import { closeBatch } from './actions.ts';
+import { runnable } from './batch.ts';
 import { config } from './config.ts';
 import { type Db, type Pr, type WorkItem, type WorkKind, now } from './db.ts';
 import { Blocked, ensureWorktree, fetchBase, git, interactiveSessionsIn, isDirty, sync } from './git.ts';
@@ -59,10 +60,12 @@ export function createRunner({ db, poller, dashboardUrl }: RunnerDeps) {
   }
 
   function nextPr(): Pr | undefined {
-    const rows = db.all<WorkItem & { paused: number }>(
-      `SELECT w.* FROM work_items w JOIN prs p ON p.id = w.pr_id
-       WHERE w.state = 'queued' AND p.state = 'open' AND p.paused = 0 AND p.blocked IS NULL`,
-    );
+    const rows = db
+      .all<WorkItem & { check_state: string | null }>(
+        `SELECT w.*, p.check_state FROM work_items w JOIN prs p ON p.id = w.pr_id
+         WHERE w.state = 'queued' AND p.state = 'open' AND p.paused = 0 AND p.blocked IS NULL`,
+      )
+      .filter((w) => runnable(w, w.kind));
     rows.sort((a, b) => PRIORITY[a.kind] - PRIORITY[b.kind] || a.id - b.id);
     return rows[0] ? db.pr(rows[0].pr_id) : undefined;
   }
@@ -201,7 +204,7 @@ export function createRunner({ db, poller, dashboardUrl }: RunnerDeps) {
   }
 
   async function processPr(pr: Pr) {
-    const queued = db.workItems(pr.id).filter((w) => w.state === 'queued');
+    const queued = db.workItems(pr.id).filter((w) => w.state === 'queued' && runnable(pr, w.kind));
     const close = queued.find((w) => w.kind === 'close_batch');
     if (close) {
       db.update('work_items', close.id, { state: 'in_progress', started_at: now() });

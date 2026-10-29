@@ -96,6 +96,7 @@ function saveDraft(id: number, draft: Draft) {
           </div>
         }
         @if (d.pr.paused) { <div class="banner warn">The agent is paused for this PR. GitHub activity is still collected.</div> }
+        @if (d.pr.waitingForBuild) { <div class="banner warn">The review waits until the build is successful.</div> }
         @if (d.pr.review_out_of_date) { <div class="banner warn">The review is out of date: new commits or replies since my review.</div> }
         @if (error()) { <div class="banner error">{{ error() }}</div> }
       </div>

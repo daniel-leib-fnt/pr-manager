@@ -1,4 +1,12 @@
-import type { Comment, Pr, Question, WorkItem } from './db.ts';
+import type { Comment, Pr, Question, WorkItem, WorkKind } from './db.ts';
+
+/** Reviews wait for a green build. A PR without checks counts as green. */
+export const buildGreen = (pr: Pick<Pr, 'check_state'>) => !pr.check_state || pr.check_state === 'SUCCESS';
+
+const REVIEW_KINDS = new Set<WorkKind>(['review', 'followup_review']);
+
+/** Whether a queued item may run now; reviews are held back until the build is green. */
+export const runnable = (pr: Pick<Pr, 'check_state'>, kind: WorkKind) => !REVIEW_KINDS.has(kind) || buildGreen(pr);
 
 /** Comments that still need the agent or me before the batch can be pushed. */
 export const OPEN_STATES = new Set(['new', 'proposal', 'accepted']);

@@ -34,6 +34,7 @@ const GROUPS: { key: Group; label: string }[] = [
                 <span class="title">{{ pr.title }}</span>
                 <span class="chips">
                   @if (pr.is_draft) { <span class="chip">draft</span> }
+                  @if (pr.waitingForBuild) { <span class="chip warn">waiting for build</span> }
                   @if (pr.paused) { <span class="chip warn">paused</span> }
                   @if (pr.running) { <span class="chip live">working</span> }
                   @if (pr.counts.proposals) { <span class="chip need">{{ pr.counts.proposals }} proposal(s)</span> }

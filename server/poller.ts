@@ -1,4 +1,4 @@
-import { batchStatus, readyToClose } from './batch.ts';
+import { batchStatus, buildGreen, readyToClose } from './batch.ts';
 import { config, inPollWindow } from './config.ts';
 import { type Comment, type Db, type Pr, type PrState, now } from './db.ts';
 import { Blocked, removeWorktree } from './git.ts';
@@ -113,7 +113,7 @@ export function createPoller({ db, dashboardUrl, ownSessionIds, wake }: PollerDe
       if (isChanged) await ingest(pr, me);
     } else {
       const becameReady = prev.is_draft && !gh.isDraft;
-      if (!pr.is_draft && pr.review_state === 'none' && (becameReady || !db.workItems(pr.id).some((w) => w.kind === 'review'))) {
+      if (!pr.is_draft && buildGreen(pr) && pr.review_state === 'none' && (becameReady || !db.workItems(pr.id).some((w) => w.kind === 'review'))) {
         db.enqueue(pr.id, 'review');
       }
       // GitHub drops a PR from review-requested once I reviewed it; showing up again is a re-request.
