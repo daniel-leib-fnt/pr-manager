@@ -13,6 +13,7 @@ let
       exit 1
     }
     export CLAUDE_CODE_OAUTH_TOKEN="$token"
+    export PR_MANAGER_ALLOWED_TOOLS=${lib.escapeShellArg (builtins.toJSON cfg.allowedTools)}
     exec ${cfg.package}/bin/pr-manager-daemon
   '';
 in
@@ -62,7 +63,6 @@ in
         ExecStart = "${start}";
         Environment = [
           "PR_MANAGER_PORT=${toString cfg.port}"
-          "PR_MANAGER_ALLOWED_TOOLS=${builtins.toJSON cfg.allowedTools}"
           # The daemon needs git, gh and notify-send; agent sessions also need the user's
           # toolchain (JDK, pnpm, ...), which comes from the user and system profiles.
           "PATH=${lib.makeBinPath [ pkgs.git pkgs.gh pkgs.libnotify pkgs.xdg-utils pkgs.coreutils pkgs.bash ]}:${config.home.profileDirectory}/bin:/run/current-system/sw/bin:/run/wrappers/bin"
