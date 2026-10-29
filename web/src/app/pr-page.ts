@@ -79,6 +79,11 @@ function saveDraft(id: number, draft: Draft) {
           } @else {
             <button (click)="act('pause')">Pause agent</button>
           }
+          @if (d.pr.role === 'review' && d.pr.ignored) {
+            <button (click)="act('unignore')">Stop ignoring</button>
+          } @else if (d.pr.role === 'review' && d.pr.state === 'open') {
+            <button class="subtle" (click)="act('ignore')">Ignore review</button>
+          }
           @if (d.pr.role === 'review' && d.pr.review_state === 'submitted') {
             <button (click)="act('followup-review')">Follow-up review</button>
           }
@@ -95,6 +100,7 @@ function saveDraft(id: number, draft: Draft) {
             <button (click)="act('unblock')">Retry</button>
           </div>
         }
+        @if (d.pr.ignored) { <div class="banner warn">This review is ignored. The agent does nothing here and sends no notifications.</div> }
         @if (d.pr.paused) { <div class="banner warn">The agent is paused for this PR. GitHub activity is still collected.</div> }
         @if (d.pr.waitingForBuild) { <div class="banner warn">The review waits until the build is successful.</div> }
         @if (d.pr.review_out_of_date) { <div class="banner warn">The review is out of date: new commits or replies since my review.</div> }

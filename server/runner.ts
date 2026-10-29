@@ -63,7 +63,7 @@ export function createRunner({ db, poller, dashboardUrl }: RunnerDeps) {
     const rows = db
       .all<WorkItem & { check_state: string | null }>(
         `SELECT w.*, p.check_state FROM work_items w JOIN prs p ON p.id = w.pr_id
-         WHERE w.state = 'queued' AND p.state = 'open' AND p.paused = 0 AND p.blocked IS NULL`,
+         WHERE w.state = 'queued' AND p.state = 'open' AND p.paused = 0 AND p.ignored = 0 AND p.blocked IS NULL`,
       )
       .filter((w) => runnable(w, w.kind));
     rows.sort((a, b) => PRIORITY[a.kind] - PRIORITY[b.kind] || a.id - b.id);
@@ -195,7 +195,7 @@ export function createRunner({ db, poller, dashboardUrl }: RunnerDeps) {
     }
     if (kinds.has('review') || kinds.has('followup_review')) {
       db.update('prs', pr.id, { review_state: 'draft' });
-      notify(`Review draft ready: ${pr.repo}#${pr.number}`, pr.title, prUrl(pr));
+      if (!pr.ignored) notify(`Review draft ready: ${pr.repo}#${pr.number}`, pr.title, prUrl(pr));
       return;
     }
     const waiting = db.comments(pr.id).filter((c) => c.state === 'proposal').length + db.questions(pr.id).filter((q) => q.state === 'open').length;

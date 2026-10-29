@@ -42,6 +42,7 @@ export interface Pr {
   reviewed_sha: string | null;
   reviewed_at: string | null;
   review_out_of_date: number;
+  ignored: number;
   created_at: string;
 }
 
@@ -157,6 +158,7 @@ CREATE TABLE IF NOT EXISTS prs (
   reviewed_sha TEXT,
   reviewed_at TEXT,
   review_out_of_date INTEGER NOT NULL DEFAULT 0,
+  ignored INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
 );
 CREATE TABLE IF NOT EXISTS comments (
@@ -230,6 +232,12 @@ export function openDb(path = join(config.stateDir, 'pr-manager.db')) {
   const db = new DatabaseSync(path);
   db.exec('PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;');
   db.exec(schema);
+  // Columns added after the first release; CREATE TABLE IF NOT EXISTS does not add them.
+  const migrations: [string, string, string][] = [['prs', 'ignored', 'INTEGER NOT NULL DEFAULT 0']];
+  for (const [table, column, type] of migrations) {
+    const cols = db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[];
+    if (!cols.some((c) => c.name === column)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`);
+  }
 
   const all = <T>(sql: string, ...params: SQLInputValue[]) => db.prepare(sql).all(...params) as unknown as T[];
   const get = <T>(sql: string, ...params: SQLInputValue[]) => db.prepare(sql).get(...params) as unknown as T | undefined;

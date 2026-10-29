@@ -113,11 +113,11 @@ export function createPoller({ db, dashboardUrl, ownSessionIds, wake }: PollerDe
       if (isChanged) await ingest(pr, me);
     } else {
       const becameReady = prev.is_draft && !gh.isDraft;
-      if (!pr.is_draft && buildGreen(pr) && pr.review_state === 'none' && (becameReady || !db.workItems(pr.id).some((w) => w.kind === 'review'))) {
+      if (!pr.ignored && !pr.is_draft && buildGreen(pr) && pr.review_state === 'none' && (becameReady || !db.workItems(pr.id).some((w) => w.kind === 'review'))) {
         db.enqueue(pr.id, 'review');
       }
       // GitHub drops a PR from review-requested once I reviewed it; showing up again is a re-request.
-      if (pr.review_state === 'submitted' && inReviewSearch && !prev.in_review_search) db.enqueue(pr.id, 'followup_review', { reRequested: true });
+      if (!pr.ignored && pr.review_state === 'submitted' && inReviewSearch && !prev.in_review_search) db.enqueue(pr.id, 'followup_review', { reRequested: true });
       if (isChanged && pr.review_state === 'submitted') await checkReviewOutOfDate(pr, me);
     }
     if (isChanged) changed(pr.id);

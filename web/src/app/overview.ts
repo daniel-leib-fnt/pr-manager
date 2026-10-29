@@ -10,8 +10,22 @@ const GROUPS: { key: Group; label: string }[] = [
   { key: 'queued', label: 'Queued' },
   { key: 'out_of_date', label: 'Review out of date' },
   { key: 'waiting', label: 'Waiting on others' },
+  { key: 'ignored', label: 'Ignored' },
   { key: 'closed', label: 'Closed' },
 ];
+
+const COLLAPSED_KEY = 'pr-manager:collapsed';
+
+/** Collapsed sections are remembered per browser; Ignored starts collapsed. */
+function loadCollapsed(): Set<Group> {
+  try {
+    const raw = localStorage.getItem(COLLAPSED_KEY);
+    if (raw) return new Set(JSON.parse(raw) as Group[]);
+  } catch {
+    // storage unavailable
+  }
+  return new Set<Group>(['ignored']);
+}
 
 @Component({
   selector: 'app-overview',
@@ -24,7 +38,10 @@ const GROUPS: { key: Group; label: string }[] = [
 
     @for (g of groups(); track g.key) {
       <section class="group">
-        <h2>{{ g.label }} <span class="count">{{ g.prs.length }}</span></h2>
+        <h2 class="toggle" (click)="toggle(g.key)">
+          <span class="caret">{{ collapsed().has(g.key) ? '▸' : '▾' }}</span> {{ g.label }} <span class="count">{{ g.prs.length }}</span>
+        </h2>
+        @if (!collapsed().has(g.key)) {
         <ul class="pr-list">
           @for (pr of g.prs; track pr.id) {
             <li>
@@ -49,6 +66,7 @@ const GROUPS: { key: Group; label: string }[] = [
             </li>
           }
         </ul>
+        }
       </section>
     }
     @if (!prs().length) {
@@ -61,6 +79,7 @@ export class Overview {
   protected readonly prs = signal<Pr[]>([]);
   protected readonly lastPoll = signal<string | null>(null);
   protected readonly polling = signal(false);
+  protected readonly collapsed = signal(loadCollapsed());
   protected readonly groups = computed(() =>
     GROUPS.map((g) => ({ ...g, prs: this.prs().filter((p) => p.group === g.key) })).filter((g) => g.prs.length),
   );
@@ -76,6 +95,17 @@ export class Overview {
     const res = await this.api.prs();
     this.prs.set(res.prs);
     this.lastPoll.set(res.lastPoll);
+  }
+
+  protected toggle(key: Group) {
+    const next = new Set(this.collapsed());
+    if (!next.delete(key)) next.add(key);
+    this.collapsed.set(next);
+    try {
+      localStorage.setItem(COLLAPSED_KEY, JSON.stringify([...next]));
+    } catch {
+      // storage unavailable; the state just is not remembered
+    }
   }
 
   protected async poll() {

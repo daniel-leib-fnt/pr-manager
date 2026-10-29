@@ -11,10 +11,11 @@ import type { Poller } from './poller.ts';
 import type { Runner } from './runner.ts';
 import { bus, changed, clearNotification, errorMessage } from './util.ts';
 
-export type Group = 'needs_me' | 'working' | 'queued' | 'blocked' | 'out_of_date' | 'waiting' | 'closed';
+export type Group = 'needs_me' | 'working' | 'queued' | 'blocked' | 'out_of_date' | 'waiting' | 'ignored' | 'closed';
 
 export function groupOf(db: Db, pr: Pr): Group {
   if (pr.state !== 'open') return pr.blocked ? 'blocked' : 'closed';
+  if (pr.ignored) return 'ignored';
   if (pr.blocked) return 'blocked';
   if (pr.agent_running) return 'working';
   const comments = db.comments(pr.id);
@@ -126,6 +127,17 @@ export function createHttp({ db, poller, runner }: { db: Db; poller: Poller; run
       // Failed work is retried after a manual unblock.
       db.run(`UPDATE work_items SET state = 'queued', error = NULL WHERE pr_id = ? AND state = 'failed' AND id = (SELECT MAX(id) FROM work_items WHERE pr_id = ?)`, pr.id, pr.id);
       changed(pr.id);
+      runner.wake();
+    },
+    'POST ignore': async (_q, _r, pr) => {
+      if (pr.role !== 'review') throw new Error('Only reviews can be ignored.');
+      db.update('prs', pr.id, { ignored: 1 });
+      changed(pr.id);
+    },
+    'POST unignore': async (_q, _r, pr) => {
+      db.update('prs', pr.id, { ignored: 0 });
+      changed(pr.id);
+      await poller.pollNow();
       runner.wake();
     },
     'POST reset-session': async (_q, _r, pr) => {

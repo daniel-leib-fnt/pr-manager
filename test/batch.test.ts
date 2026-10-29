@@ -68,3 +68,18 @@ test('reviews wait for a green build', async () => {
   assert.equal(runnable({ check_state: 'FAILURE' }, 'answers'), true);
   assert.equal(runnable({ check_state: 'FAILURE' }, 'comments'), true);
 });
+
+test('an existing database gets the ignored column', async () => {
+  const { DatabaseSync } = await import('node:sqlite');
+  const { mkdtempSync } = await import('node:fs');
+  const { join } = await import('node:path');
+  const { tmpdir } = await import('node:os');
+  const path = join(mkdtempSync(join(tmpdir(), 'prm-')), 'old.db');
+  const old = new DatabaseSync(path);
+  old.exec(`CREATE TABLE prs (id INTEGER PRIMARY KEY, url TEXT NOT NULL UNIQUE)`);
+  old.close();
+  const { openDb } = await import('../server/db.ts');
+  const db = openDb(path);
+  const cols = db.all<{ name: string }>('PRAGMA table_info(prs)').map((c) => c.name);
+  assert.ok(cols.includes('ignored'));
+});

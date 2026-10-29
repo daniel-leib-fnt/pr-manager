@@ -2,7 +2,7 @@ import { HttpClient } from '@angular/common/http';
 import { Injectable, inject, signal } from '@angular/core';
 import { Observable, Subject, firstValueFrom } from 'rxjs';
 
-export type Group = 'needs_me' | 'working' | 'queued' | 'blocked' | 'out_of_date' | 'waiting' | 'closed';
+export type Group = 'needs_me' | 'working' | 'queued' | 'blocked' | 'out_of_date' | 'waiting' | 'ignored' | 'closed';
 
 export interface Pr {
   id: number;
@@ -28,6 +28,7 @@ export interface Pr {
   review_body: string | null;
   reviewed_sha: string | null;
   review_out_of_date: number;
+  ignored: number;
   group: Group;
   running: boolean;
   batch: 'none' | 'open' | 'closable';

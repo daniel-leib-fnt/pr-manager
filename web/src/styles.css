@@ -101,6 +101,8 @@ label textarea, label select { margin-top: 3px; color: var(--text); }
 
 .group { margin-bottom: 22px; }
 .group h2 { color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; font-size: 12px; }
+.group h2.toggle { cursor: pointer; user-select: none; }
+.caret { display: inline-block; width: 1em; }
 .count { background: var(--chip-bg); border-radius: 10px; padding: 0 7px; margin-left: 4px; }
 .pr-list { list-style: none; margin: 0; padding: 0; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; }
 .pr-list li + li { border-top: 1px solid var(--border); }
