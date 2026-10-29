@@ -65,7 +65,7 @@ in
           "PR_MANAGER_ALLOWED_TOOLS=${builtins.toJSON cfg.allowedTools}"
           # The daemon needs git, gh and notify-send; agent sessions also need the user's
           # toolchain (JDK, pnpm, ...), which comes from the user and system profiles.
-          "PATH=${lib.makeBinPath [ pkgs.git pkgs.gh pkgs.libnotify pkgs.xdg-utils pkgs.coreutils pkgs.bash ]}:/etc/profiles/per-user/${config.home.username}/bin:${config.home.profileDirectory}/bin:/run/current-system/sw/bin:/run/wrappers/bin"
+          "PATH=${lib.makeBinPath [ pkgs.git pkgs.gh pkgs.libnotify pkgs.xdg-utils pkgs.coreutils pkgs.bash ]}:${config.home.profileDirectory}/bin:/run/current-system/sw/bin:/run/wrappers/bin"
         ];
         Restart = "on-failure";
         RestartSec = "60s";
