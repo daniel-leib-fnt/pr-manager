@@ -4,7 +4,6 @@
   "private": true,
   "type": "module",
   "description": "Local dashboard and agent runner for GitHub pull requests",
-  "license": "MIT",
   "bin": {
     "pr-manager": "server/cli.ts"
   },
