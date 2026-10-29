@@ -68,6 +68,7 @@ export interface Finding {
   in_diff: number;
   body: string;
   state: 'draft' | 'skipped' | 'submitted';
+  url: string | null;
 }
 
 export interface WorkItem {

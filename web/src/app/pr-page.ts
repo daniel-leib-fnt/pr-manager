@@ -152,6 +152,7 @@ function saveDraft(id: number, draft: Draft) {
               <div class="item-head">
                 <span class="chip">{{ f.kind === 'finding' ? 'finding' : 'reply' }}</span>
                 @if (f.path) { <code>{{ f.path }}:{{ f.line }}</code> }
+                @if (f.url) { <a [href]="f.url" target="_blank" rel="noopener">GitHub</a> }
                 @if (f.kind === 'finding' && !f.in_diff) { <span class="chip warn">outside diff, goes into body</span> }
                 <label class="push-right"><input type="checkbox" [(ngModel)]="finding(f.id, f.body).skip" (ngModelChange)="persist()" /> Skip</label>
               </div>

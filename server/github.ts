@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto';
+import type { Finding, Pr } from './db.ts';
 import { run } from './util.ts';
 
 export class GithubError extends Error {
@@ -230,6 +232,15 @@ export async function prFiles(repo: string, number: number): Promise<PrFile[]> {
     if (files.length < 100) break;
   }
   return out;
+}
+
+/** Link to where a review finding points: the diff line, the file line outside the diff, or the thread. */
+export function findingUrl(pr: Pr, f: Finding): string | null {
+  if (f.kind === 'thread_reply') return f.reply_to_db_id ? `${pr.url}#discussion_r${f.reply_to_db_id}` : null;
+  if (!f.path) return null;
+  if (f.in_diff) return `${pr.url}/files#diff-${createHash('sha256').update(f.path).digest('hex')}R${f.line}`;
+  const path = f.path.split('/').map(encodeURIComponent).join('/');
+  return `https://github.com/${pr.repo}/blob/${pr.review_draft_sha ?? pr.head_sha}/${path}${f.line ? `#L${f.line}` : ''}`;
 }
 
 /** Lines on the right side of the diff that a review comment can be attached to. */

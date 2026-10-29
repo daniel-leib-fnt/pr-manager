@@ -1,7 +1,7 @@
 import { batchStatus, replyFor, shouldResolve } from './batch.ts';
 import { type Comment, type Db, type Pr, type WorkKind, now } from './db.ts';
 import { Blocked, isDirty, localChanged, push, rebaseOntoBase, sync } from './git.ts';
-import { GithubError, graphql, rest } from './github.ts';
+import { GithubError, findingUrl, graphql, rest } from './github.ts';
 import type { Poller } from './poller.ts';
 import { changed } from './util.ts';
 
@@ -131,7 +131,7 @@ export async function submitReview(db: Db, pr: Pr, input: ReviewInput) {
   const inline = kept.filter((f) => f.kind === 'finding' && f.in_diff);
   const outside = kept.filter((f) => f.kind === 'finding' && !f.in_diff);
   const replies = kept.filter((f) => f.kind === 'thread_reply');
-  const body = [input.body.trim(), ...outside.map((f) => `**${f.path}:${f.line}**: ${f.body}`)].filter(Boolean).join('\n\n');
+  const body = [input.body.trim(), ...outside.map((f) => `**[${f.path}:${f.line}](${findingUrl(pr, f)})**: ${f.body}`)].filter(Boolean).join('\n\n');
   const commit = pr.review_draft_sha ?? pr.head_sha;
 
   if (inline.length || body || input.verdict !== 'COMMENT') {

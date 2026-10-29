@@ -6,6 +6,7 @@ import { type ReviewInput, type SubmitInput, addInstruction, submitDecisions, su
 import { batchStatus } from './batch.ts';
 import { config } from './config.ts';
 import type { Db, Pr } from './db.ts';
+import { findingUrl } from './github.ts';
 import type { Poller } from './poller.ts';
 import type { Runner } from './runner.ts';
 import { bus, changed, clearNotification, errorMessage } from './util.ts';
@@ -82,7 +83,7 @@ export function createHttp({ db, poller, runner }: { db: Db; poller: Poller; run
       pr: summary(db, pr, runner.current()),
       comments: db.comments(pr.id),
       questions: db.questions(pr.id),
-      findings: db.findings(pr.id),
+      findings: db.findings(pr.id).map((f) => ({ ...f, url: findingUrl(pr, f) })),
       work: db.workItems(pr.id).slice(-30),
     }),
     'GET transcript': async (_q, _r, pr) => {
