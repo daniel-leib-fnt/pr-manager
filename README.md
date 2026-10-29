@@ -8,6 +8,7 @@ A local daemon with a dashboard for my GitHub pull requests: the ones I authored
   - I accept or skip proposals and answer questions, then submit them all at once, like a GitHub review.
   - When every item is fixed or skipped, the daemon rebases, pushes once with `--force-with-lease`, posts the replies and resolves the threads.
   - Every unchecked checklist line (`- [ ] ...`) in a comment is an item of its own, and a box checked on GitHub closes it. When the batch closes, the daemon checks off fixed lines. A comment of nothing but checklist lines gets no reply, because the checked box is the answer.
+  - When GitHub reports merge conflicts, the agent rebases onto the base branch and resolves mechanical conflicts; the batch then pushes the result. A conflict that needs a decision becomes a proposal.
   - A PR that GitHub reports as approved and mergeable, with nothing open in pr-manager, moves to the top section "Ready to merge". If it loses that state, for example through a new review or a failed check, the daemon reads it again right away.
 - **PRs I review:** the agent writes one review draft with findings and a suggested verdict. I edit and submit it.
   - New commits mark the review as out of date.

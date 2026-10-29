@@ -109,7 +109,7 @@ export function createAgentTools(db: Db, prId: number, onBlocked: (reason: strin
 
     def(
       'mark_fixed',
-      'Marks a comment as fixed after you changed the code and amended the commit. replyDraft is the reply posted on GitHub when the batch is pushed; use an empty string for CI failures and instructions.',
+      'Marks a comment as fixed after you changed the code and amended the commit. replyDraft is the reply posted on GitHub when the batch is pushed; use an empty string for CI failures, instructions and merge conflicts.',
       { commentId: z.number(), replyDraft: z.string() },
       async ({ commentId, replyDraft }) => {
         const c = ownComment(commentId);

@@ -122,6 +122,8 @@ export function createPoller({ db, dashboardUrl, ownSessionIds, wake }: PollerDe
       const lostReady = !!prev.ready && !pr.ready;
       // Losing the ready state means something changed on GitHub: look at the PR again, even if its update time did not move.
       if (isChanged || lostReady) await ingest(pr, me);
+      // A moving base does not change the PR's update time, so conflicts are checked on every poll.
+      if (gh.mergeStateStatus === 'DIRTY') addConflict(pr, gh);
       if (prev.ready !== pr.ready) changed(pr.id);
     } else {
       const becameReady = prev.is_draft && !gh.isDraft;
@@ -276,6 +278,26 @@ export function createPoller({ db, dashboardUrl, ownSessionIds, wake }: PollerDe
       changed(pr.id);
     }
     return added;
+  }
+
+  /** A merge conflict on one of my PRs becomes an item: the agent rebases, the batch pushes. */
+  function addConflict(pr: Pr, gh: GhPr) {
+    const comments = db.comments(pr.id);
+    // One conflict at a time: a base that moves on while the agent works is picked up by the same rebase.
+    if (comments.some((c) => c.kind === 'conflict' && ['new', 'proposal', 'accepted', 'fixed'].includes(c.state))) return;
+    const key = `conflict:${gh.headRefOid}:${gh.baseRefOid}`;
+    if (comments.some((c) => c.gh_key === key)) return;
+    db.insert('comments', {
+      pr_id: pr.id,
+      kind: 'conflict',
+      gh_key: key,
+      author: 'github',
+      body: `GitHub reports merge conflicts with ${pr.base_ref} (head ${gh.headRefOid.slice(0, 8)}, base ${gh.baseRefOid.slice(0, 8)}). Rebase onto refs/remotes/origin/${pr.base_ref}.`,
+    });
+    const fresh = db.pr(pr.id)!;
+    db.update('prs', pr.id, { last_event_at: now(), batch_head_sha: fresh.batch_head_sha ?? gh.headRefOid });
+    db.enqueue(pr.id, 'comments');
+    changed(pr.id);
   }
 
   async function checkReviewOutOfDate(pr: Pr, me: string) {

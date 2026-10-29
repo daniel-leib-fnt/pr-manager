@@ -34,7 +34,7 @@ export function readyToClose(pr: Pr, status: BatchStatus, quietMs: number, now =
 
 /** Replies posted for a comment when the batch closes, or null for none. */
 export function replyFor(c: Comment, viewer: string): string | null {
-  if (c.kind === 'ci' || c.kind === 'instruction') return null;
+  if (c.kind === 'ci' || c.kind === 'instruction' || c.kind === 'conflict') return null;
   let text: string | null = null;
   if (c.state === 'fixed') text = c.reply_draft?.trim() || null;
   if (c.state === 'skipped') text = c.skip_reason?.trim() || null;

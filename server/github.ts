@@ -73,7 +73,7 @@ export async function jobLog(repo: string, jobId: number): Promise<string> {
 export const PR_FIELDS = `
   url number title isDraft state merged updatedAt
   mergeStateStatus reviewDecision latestReviews(first: 20) { nodes { state } }
-  headRefName headRefOid baseRefName isCrossRepository
+  headRefName headRefOid baseRefName baseRefOid isCrossRepository
   author { login }
   repository { nameWithOwner }
   commits(last: 1) { nodes { commit { statusCheckRollup { state } } } }
@@ -90,6 +90,7 @@ export interface GhPr {
   headRefName: string;
   headRefOid: string;
   baseRefName: string;
+  baseRefOid: string;
   isCrossRepository: boolean;
   author: { login: string } | null;
   repository: { nameWithOwner: string };

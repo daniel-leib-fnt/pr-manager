@@ -41,6 +41,8 @@ Triage every item with state `new`:
 
 Items with state `accepted` are proposals I approved or instructions I typed. Implement them, then call `mark_fixed`. If I edited a proposal, my version is the fix: apply it as written and do not fall back to your original proposal. If my version is too vague to turn into an edit, `ask` one targeted question before touching any files.
 
+**Merge conflict items** (kind `conflict`): GitHub cannot merge the PR into its base. Rebase onto the base ref named in the item with `git rebase`. Resolve conflicts that are mechanical, such as imports, neighboring edits or both sides adding entries, and keep the intent of both sides. Run the checks for the files you touched, then `mark_fixed` with an empty reply. The daemon pushes the rebased branch with the batch. If resolving a conflict needs a decision about behavior, run `git rebase --abort` and `propose` with what conflicts and the resolution you suggest.
+
 **Failed CI items** carry the failing logs. Treat them like a comment. When `autoFixAllowed` is false, automatic fixes are exhausted: use `propose` instead.
 
 **Toolchain:** if the repository has a `flake.nix` dev shell and a tool such as `pnpm` is missing, run it through `nix develop -c <command>`.
@@ -51,7 +53,7 @@ Items with state `accepted` are proposals I approved or instructions I typed. Im
 
 - Write natural, plain English that does not sound generated. Keep it short and factual.
 - Name the specific change you made, or say why you made none.
-- Use an empty reply for CI items and instructions.
+- Use an empty reply for CI items, instructions and merge conflicts.
 - Do not add a header or quote the comment. The daemon adds the header and quotes conversation comments when it posts.
 - **Checklist items:** when `checklistOnly` is true, use an empty reply. The checked box is the answer, and the diff shows the rest. That holds however much there would be to tell: which approach you took, what the fix touched, or that nothing needed to change. Write a reply only when the comment has prose around its checklist lines (`checklistOnly` false). The daemon then quotes just that line.
 

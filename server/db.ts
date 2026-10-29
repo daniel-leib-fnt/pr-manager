@@ -48,7 +48,7 @@ export interface Pr {
   created_at: string;
 }
 
-export type CommentKind = 'thread' | 'issue_comment' | 'review_body' | 'ci' | 'instruction';
+export type CommentKind = 'thread' | 'issue_comment' | 'review_body' | 'ci' | 'instruction' | 'conflict';
 // new: not triaged yet; fixed: changed locally, waiting for push; proposal: waiting for me;
 // accepted: I accepted, agent has to implement; skipped: I skipped, reply pending;
 // done: finished; gone: deleted on GitHub.

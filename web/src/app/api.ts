@@ -41,7 +41,7 @@ export interface Pr {
 
 export interface Comment {
   id: number;
-  kind: 'thread' | 'issue_comment' | 'review_body' | 'ci' | 'instruction';
+  kind: 'thread' | 'issue_comment' | 'review_body' | 'ci' | 'instruction' | 'conflict';
   author: string | null;
   body: string;
   path: string | null;
