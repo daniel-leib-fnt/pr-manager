@@ -153,6 +153,11 @@ export async function sync(pr: Pr, path: string): Promise<string | undefined> {
     );
   }
   if (head === remote) return;
+  // A PR I review holds no work of mine: after a force push, just check out the new head.
+  if (pr.role === 'review') {
+    await git(path, ['reset', '--hard', remoteHeadRef(pr)]);
+    return undefined;
+  }
   if (await isAncestor(path, head, remote)) {
     await git(path, ['merge', '--ff-only', remoteHeadRef(pr)]);
     return;
