@@ -4,6 +4,7 @@ import { RouterLink } from '@angular/router';
 import { Api, type Group, type Pr } from './api';
 
 const GROUPS: { key: Group; label: string }[] = [
+  { key: 'ready', label: 'Ready to merge' },
   { key: 'needs_me', label: 'Needs me' },
   { key: 'blocked', label: 'Blocked' },
   { key: 'working', label: 'Agent working' },

@@ -12,7 +12,7 @@ import type { Runner } from './runner.ts';
 import { deniedCalls, describeNixOnly, describeSettings, isExcluded, resetOverride, saveOverrides } from './settings.ts';
 import { bus, changed, clearNotification, errorMessage } from './util.ts';
 
-export type Group = 'needs_me' | 'working' | 'queued' | 'blocked' | 'out_of_date' | 'waiting' | 'ignored' | 'closed';
+export type Group = 'ready' | 'needs_me' | 'working' | 'queued' | 'blocked' | 'out_of_date' | 'waiting' | 'ignored' | 'closed';
 
 export function groupOf(db: Db, pr: Pr): Group {
   if (pr.state !== 'open') return pr.blocked ? 'blocked' : 'closed';
@@ -23,6 +23,7 @@ export function groupOf(db: Db, pr: Pr): Group {
   const questions = db.questions(pr.id);
   if (comments.some((c) => c.state === 'proposal') || questions.some((q) => q.state === 'open') || pr.review_state === 'draft') return 'needs_me';
   if (db.workItems(pr.id).some((w) => w.state === 'queued' && runnable(pr, w.kind))) return 'queued';
+  if (pr.ready && pr.role === 'own' && batchStatus(comments, questions, db.workItems(pr.id)) === 'none') return 'ready';
   if (pr.review_out_of_date) return 'out_of_date';
   return 'waiting';
 }

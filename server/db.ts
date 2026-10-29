@@ -43,6 +43,8 @@ export interface Pr {
   reviewed_at: string | null;
   review_out_of_date: number;
   ignored: number;
+  /** 1 while GitHub reports one of my PRs as approved and mergeable. */
+  ready: number;
   created_at: string;
 }
 
@@ -165,6 +167,7 @@ CREATE TABLE IF NOT EXISTS prs (
   reviewed_at TEXT,
   review_out_of_date INTEGER NOT NULL DEFAULT 0,
   ignored INTEGER NOT NULL DEFAULT 0,
+  ready INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
 );
 CREATE TABLE IF NOT EXISTS comments (
@@ -247,6 +250,7 @@ export function openDb(path = join(config.stateDir, 'pr-manager.db')) {
     ['comments', 'task', 'TEXT'],
     ['comments', 'task_source', 'TEXT'],
     ['comments', 'clarify', 'INTEGER NOT NULL DEFAULT 0'],
+    ['prs', 'ready', 'INTEGER NOT NULL DEFAULT 0'],
   ];
   for (const [table, column, type] of migrations) {
     const cols = db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[];

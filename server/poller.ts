@@ -11,6 +11,7 @@ import {
   failedChecks,
   prDetail,
   prsByUrl,
+  readyToMerge,
   rollupState,
   searchPrs,
   viewerLogin,
@@ -91,6 +92,8 @@ export function createPoller({ db, dashboardUrl, ownSessionIds, wake }: PollerDe
       gh_updated_at: gh.updatedAt,
       check_state: rollupState(gh),
       in_review_search: inReviewSearch ? 1 : 0,
+      // While GitHub still computes the merge state, the last known value stands.
+      ready: role === 'own' ? Number(readyToMerge(gh) ?? !!pr?.ready) : 0,
     };
     if (!pr) {
       if (state !== 'open') return;
@@ -116,7 +119,10 @@ export function createPoller({ db, dashboardUrl, ownSessionIds, wake }: PollerDe
 
     if (role === 'own') {
       if (fields.check_state === 'SUCCESS' && pr.ci_attempts) db.update('prs', pr.id, { ci_attempts: 0 });
-      if (isChanged) await ingest(pr, me);
+      const lostReady = !!prev.ready && !pr.ready;
+      // Losing the ready state means something changed on GitHub: look at the PR again, even if its update time did not move.
+      if (isChanged || lostReady) await ingest(pr, me);
+      if (prev.ready !== pr.ready) changed(pr.id);
     } else {
       const becameReady = prev.is_draft && !gh.isDraft;
       if (!pr.ignored && !pr.is_draft && buildGreen(pr) && pr.review_state === 'none' && (becameReady || !db.workItems(pr.id).some((w) => w.kind === 'review'))) {

@@ -72,6 +72,7 @@ export async function jobLog(repo: string, jobId: number): Promise<string> {
 
 export const PR_FIELDS = `
   url number title isDraft state merged updatedAt
+  mergeStateStatus reviewDecision latestReviews(first: 20) { nodes { state } }
   headRefName headRefOid baseRefName isCrossRepository
   author { login }
   repository { nameWithOwner }
@@ -93,6 +94,23 @@ export interface GhPr {
   author: { login: string } | null;
   repository: { nameWithOwner: string };
   commits: { nodes: { commit: { statusCheckRollup: { state: string } | null } }[] };
+  mergeStateStatus: string;
+  reviewDecision: 'APPROVED' | 'CHANGES_REQUESTED' | 'REVIEW_REQUIRED' | null;
+  latestReviews: { nodes: { state: string }[] };
+}
+
+/**
+ * Whether GitHub would merge the PR right now with an approval: mergeable without conflicts, required
+ * checks and rules satisfied. Without required reviews, one approval and no change request count.
+ * null while GitHub is still computing the merge state.
+ */
+export function readyToMerge(pr: GhPr): boolean | null {
+  if (pr.state !== 'OPEN' || pr.isDraft) return false;
+  if (pr.mergeStateStatus === 'UNKNOWN') return null;
+  if (pr.mergeStateStatus !== 'CLEAN' && pr.mergeStateStatus !== 'HAS_HOOKS') return false;
+  if (pr.reviewDecision) return pr.reviewDecision === 'APPROVED';
+  const states = pr.latestReviews.nodes.map((r) => r.state);
+  return states.includes('APPROVED') && !states.includes('CHANGES_REQUESTED');
 }
 
 export function rollupState(pr: GhPr): string | null {
