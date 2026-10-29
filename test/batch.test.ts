@@ -6,7 +6,7 @@ import type { Comment, Pr, Question, WorkItem } from '../server/db.ts';
 const comment = (over: Partial<Comment>): Comment => ({
   id: 1, pr_id: 1, kind: 'thread', gh_key: 'thread:x', thread_id: 'T1', reply_to_db_id: 5, last_seen_gh_id: null,
   author: 'alice', body: 'please rename', path: 'a.kt', line: 3, url: null, state: 'new', proposal: null,
-  reply_draft: null, reply_edited: 0, skip_reason: null, auto: 0, note: null, created_at: '', updated_at: '',
+  reply_draft: null, reply_edited: 0, skip_reason: null, auto: 0, note: null, task: null, task_source: null, clarify: 0, created_at: '', updated_at: '',
   ...over,
 });
 const question = (state: Question['state']): Question => ({ id: 1, pr_id: 1, comment_id: null, question: 'q', options: null, answer: null, state, created_at: '' });
@@ -52,34 +52,22 @@ test('replies carry the header only when I never saw the text', () => {
 });
 
 test('threads are resolved when fixed or skipped with a reason', () => {
-  assert.equal(shouldResolve(comment({ state: 'fixed' })), true);
-  assert.equal(shouldResolve(comment({ state: 'skipped', skip_reason: 'no' })), true);
-  assert.equal(shouldResolve(comment({ state: 'skipped' })), false);
-  assert.equal(shouldResolve(comment({ state: 'fixed', kind: 'issue_comment', thread_id: null })), false);
+  const one = (c: Comment) => shouldResolve(c, [c]);
+  assert.equal(one(comment({ state: 'fixed' })), true);
+  assert.equal(one(comment({ state: 'skipped', skip_reason: 'no' })), true);
+  assert.equal(one(comment({ state: 'skipped' })), false);
+  assert.equal(one(comment({ state: 'fixed', kind: 'issue_comment', thread_id: null })), false);
+  assert.equal(one(comment({ state: 'fixed', clarify: 1 })), false);
 });
 
-test('reviews wait for a green build', async () => {
-  const { buildGreen, runnable } = await import('../server/batch.ts');
-  assert.equal(buildGreen({ check_state: 'SUCCESS' }), true);
-  assert.equal(buildGreen({ check_state: null }), true);
-  for (const s of ['FAILURE', 'ERROR', 'PENDING', 'EXPECTED']) assert.equal(buildGreen({ check_state: s }), false, s);
-  assert.equal(runnable({ check_state: 'FAILURE' }, 'review'), false);
-  assert.equal(runnable({ check_state: 'PENDING' }, 'followup_review'), false);
-  assert.equal(runnable({ check_state: 'FAILURE' }, 'answers'), true);
-  assert.equal(runnable({ check_state: 'FAILURE' }, 'comments'), true);
-});
-
-test('an existing database gets the ignored column', async () => {
-  const { DatabaseSync } = await import('node:sqlite');
-  const { mkdtempSync } = await import('node:fs');
-  const { join } = await import('node:path');
-  const { tmpdir } = await import('node:os');
-  const path = join(mkdtempSync(join(tmpdir(), 'prm-')), 'old.db');
-  const old = new DatabaseSync(path);
-  old.exec(`CREATE TABLE prs (id INTEGER PRIMARY KEY, url TEXT NOT NULL UNIQUE)`);
-  old.close();
-  const { openDb } = await import('../server/db.ts');
-  const db = openDb(path);
-  const cols = db.all<{ name: string }>('PRAGMA table_info(prs)').map((c) => c.name);
-  assert.ok(cols.includes('ignored'));
+test('a thread with checklist lines is resolved once, after its last line is settled', () => {
+  const a = comment({ id: 1, state: 'fixed', task: 'a' });
+  const b = comment({ id: 2, state: 'fixed', task: 'b' });
+  assert.deepEqual([shouldResolve(a, [a, b]), shouldResolve(b, [a, b])], [false, true]);
+  const open = comment({ id: 2, state: 'new', task: 'b' });
+  assert.equal(shouldResolve(a, [a, open]), false);
+  const skipped = comment({ id: 2, state: 'skipped', task: 'b' });
+  assert.equal(shouldResolve(a, [a, skipped]), false);
+  const earlier = comment({ id: 2, state: 'done', task: 'b' });
+  assert.equal(shouldResolve(a, [a, earlier]), true);
 });

@@ -1,19 +1,54 @@
 import { batchStatus, replyFor, shouldResolve } from './batch.ts';
+import { type TaskSource, checkTask, hasProse } from './checklist.ts';
 import { type Comment, type Db, type Pr, type WorkKind, now } from './db.ts';
 import { Blocked, isDirty, localChanged, push, rebaseOntoBase, sync } from './git.ts';
 import { GithubError, findingUrl, graphql, rest } from './github.ts';
 import type { Poller } from './poller.ts';
 import { changed } from './util.ts';
 
+// A checklist item quotes just its line, a whole comment its beginning.
 const quote = (c: Comment) =>
-  `> @${c.author ?? 'ghost'}: ${c.body.split('\n').slice(0, 3).join(' ').slice(0, 200)}${c.body.length > 200 ? '…' : ''}\n\n`;
+  c.task ? `> - [ ] ${c.task}\n\n` : `> @${c.author ?? 'ghost'}: ${c.body.split('\n').slice(0, 3).join(' ').slice(0, 200)}${c.body.length > 200 ? '…' : ''}\n\n`;
 
 async function postReply(pr: Pr, c: Comment, text: string) {
   if (c.kind === 'thread' && c.reply_to_db_id) {
-    await rest('POST', `/repos/${pr.repo}/pulls/${pr.number}/comments/${c.reply_to_db_id}/replies`, { body: text });
+    await rest('POST', `/repos/${pr.repo}/pulls/${pr.number}/comments/${c.reply_to_db_id}/replies`, { body: (c.task ? quote(c) : '') + text });
   } else {
     await rest('POST', `/repos/${pr.repo}/issues/${pr.number}/comments`, { body: quote(c) + text });
   }
+}
+
+function sourcePath(pr: Pr, s: TaskSource) {
+  if (s.type === 'issue_comment') return `/repos/${pr.repo}/issues/comments/${s.id}`;
+  if (s.type === 'review_comment') return `/repos/${pr.repo}/pulls/comments/${s.id}`;
+  return `/repos/${pr.repo}/pulls/${pr.number}/reviews/${s.id}`;
+}
+
+/**
+ * Settles a checklist item: a fixed line gets its box checked, which is the whole answer unless the
+ * comment has prose around its checklist; a skip with a reason is a reply, and the box stays open.
+ */
+async function settleTask(pr: Pr, c: Comment, me: string) {
+  const source = JSON.parse(c.task_source!) as TaskSource;
+  const path = sourcePath(pr, source);
+  const { body } = await rest<{ body: string }>('GET', path);
+  let text = replyFor(c, me);
+  if (c.state === 'fixed' && !c.clarify) {
+    const checked = checkTask(body ?? '', c.task!);
+    let boxChecked = checked === null; // edited away or checked by someone else: nothing to check
+    if (checked !== null) {
+      try {
+        await rest(source.type === 'review' ? 'PUT' : 'PATCH', path, { body: checked });
+        boxChecked = true;
+      } catch (e) {
+        // Without the right to edit someone else's comment, a reply has to say it instead.
+        if (!(e instanceof GithubError && (e.status === 403 || e.status === 422))) throw e;
+      }
+    }
+    if (boxChecked && !hasProse(body ?? '')) text = null;
+    else if (!boxChecked) text ??= replyFor({ ...c, reply_draft: 'Done.' }, me);
+  }
+  if (text) await postReply(pr, c, text);
 }
 
 async function resolveThread(threadId: string) {
@@ -53,11 +88,16 @@ export async function closeBatch(ctx: { db: Db; poller: Poller; pr: Pr; enqueue:
   }
 
   const me = await poller.viewer();
-  for (const c of db.comments(pr.id).filter((x) => x.state === 'fixed' || x.state === 'skipped')) {
+  const all = db.comments(pr.id);
+  for (const c of all.filter((x) => x.state === 'fixed' || x.state === 'skipped')) {
     try {
-      const text = replyFor(c, me);
-      if (text) await postReply(pr, c, text);
-      if (shouldResolve(c)) await resolveThread(c.thread_id!);
+      if (c.task) {
+        await settleTask(pr, c, me);
+      } else {
+        const text = replyFor(c, me);
+        if (text) await postReply(pr, c, text);
+      }
+      if (shouldResolve(c, all)) await resolveThread(c.thread_id!);
       db.update('comments', c.id, { state: 'done' });
     } catch (e) {
       if (!gone(e)) throw e;

@@ -52,6 +52,9 @@ export interface Comment {
   skip_reason: string | null;
   auto: number;
   note: string | null;
+  /** The checklist line this item stands for; null for a whole comment. */
+  task: string | null;
+  clarify: number;
   updated_at: string;
 }
 

@@ -170,3 +170,4 @@ label textarea, label select { margin-top: 3px; color: var(--text); }
 label.inline { display: inline-flex; gap: 5px; align-items: center; margin: 0 12px 0 0; color: var(--text); font-size: 14px; }
 input.narrow { width: 120px; }
 input[type='number'] { font: inherit; padding: 6px 8px; border-radius: 6px; border: 1px solid var(--border); background: var(--bg); color: var(--text); }
+.task { font-weight: 600; margin: 0.4rem 0; }

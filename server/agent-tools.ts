@@ -1,5 +1,6 @@
 import { createSdkMcpServer, tool } from '@anthropic-ai/claude-agent-sdk';
 import { z } from 'zod';
+import { hasProse } from './checklist.ts';
 import type { Db } from './db.ts';
 import { setting } from './settings.ts';
 import { type GhPrDetail, commentableLines, jobLog, prDetail, prFiles } from './github.ts';
@@ -76,6 +77,7 @@ export function createAgentTools(db: Db, prId: number, onBlocked: (reason: strin
             line: c.line,
             url: c.url,
             conversation: c.body,
+            ...(c.task ? { checklistItem: c.task, checklistOnly: !hasProse(c.body) } : {}),
             ...(c.state === 'accepted' && c.proposal ? { acceptedProposal: c.proposal } : {}),
             ...(c.kind === 'ci' ? { failedChecks: await ciLogs(c.note), autoFixAllowed: p.ci_attempts < setting('maxCiAttempts') } : {}),
           })),
@@ -135,12 +137,12 @@ export function createAgentTools(db: Db, prId: number, onBlocked: (reason: strin
 
     def(
       'propose',
-      'Puts a comment up for my decision instead of fixing it: describe the change you propose and draft the reply. Do not change code for it yet.',
-      { commentId: z.number(), proposal: z.string(), replyDraft: z.string() },
-      async ({ commentId, proposal, replyDraft }) => {
+      'Puts a comment up for my decision instead of fixing it: describe the change you propose and draft the reply. Do not change code for it yet. Set clarifying to true when the reply asks the reviewer to clarify; its thread then stays unresolved and its checklist box unchecked.',
+      { commentId: z.number(), proposal: z.string(), replyDraft: z.string(), clarifying: z.boolean().optional() },
+      async ({ commentId, proposal, replyDraft, clarifying }) => {
         const c = ownComment(commentId);
         if (!c || (c.state !== 'new' && c.state !== 'accepted')) return fail(`Comment ${commentId} is not open.`);
-        db.update('comments', commentId, { state: 'proposal', proposal, reply_draft: replyDraft, reply_edited: 0 });
+        db.update('comments', commentId, { state: 'proposal', proposal, reply_draft: replyDraft, reply_edited: 0, clarify: clarifying ? 1 : 0 });
         return touched(ok(`Proposal for comment ${commentId} saved. I will decide on the dashboard.`));
       },
     ),

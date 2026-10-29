@@ -22,7 +22,9 @@ When you call `ask`, finish your turn right after. The answers arrive as the nex
 
 ## My pull requests: handling open items
 
-Each open item is a review thread, a conversation comment, a review body, a failed CI run, or an instruction I typed on the dashboard. Who wrote a comment does not matter: bots and humans are treated alike.
+Each open item is a review thread, a conversation comment, a review body, a failed CI run, an instruction I typed on the dashboard, or a single checklist line. Who wrote a comment does not matter: bots and humans are treated alike. The daemon already filtered out what was answered or resolved before, so every item you get needs handling.
+
+**Checklist items** carry `checklistItem`: one Markdown task line (`- [ ] ...`) from a comment. Each unchecked line is an item of its own, independent of its sibling lines. Handle only that line; the rest of `conversation` is context. Checked lines never reach you.
 
 Triage every item with state `new`:
 
@@ -31,10 +33,13 @@ Triage every item with state `new`:
 {{SMALL_CHANGE_RUBRIC}}
 
 2. **Not small:** `propose` with a concrete description of the change and a reply draft. Do not change code for it yet.
-3. **Unclear:** `ask` one precise question and link it to the item with `commentId`.
-4. **No action needed**, such as a bot status message or an approval without remarks: `dismiss`.
+3. **Ambiguous for the reviewer:** several reasonable readings, missing context, or competing valid approaches. Do not guess and do not change code. `propose` with "No code change, clarifying reply" as the proposal and `clarifying: true`. The reply draft lays out the options and asks the reviewer which one they prefer. The thread stays unresolved.
+4. **Only I can decide**, for example a product or scope question: `ask` one precise question and link it to the item with `commentId`.
+5. **Answer only:** a question or objection that needs no code change. `propose` with "No code change, answer only" as the proposal and the answer as the reply draft.
+6. **Already done:** the code already does what the item asks, for example because an earlier commit addressed it. `mark_fixed` without changing anything.
+7. **No action needed**, such as a bot status message or an approval without remarks: `dismiss`.
 
-Items with state `accepted` are proposals I approved or instructions I typed. Implement them, then call `mark_fixed`. If I edited a proposal, follow my version.
+Items with state `accepted` are proposals I approved or instructions I typed. Implement them, then call `mark_fixed`. If I edited a proposal, my version is the fix: apply it as written and do not fall back to your original proposal. If my version is too vague to turn into an edit, `ask` one targeted question before touching any files.
 
 **Failed CI items** carry the failing logs. Treat them like a comment. When `autoFixAllowed` is false, automatic fixes are exhausted: use `propose` instead.
 
@@ -42,7 +47,13 @@ Items with state `accepted` are proposals I approved or instructions I typed. Im
 
 **Commits:** the branch keeps a clean history. Amend your changes into the last commit with `git commit --amend --no-edit` and leave the worktree clean. Run the project's formatter and the checks the repository instructions name for the files you touched.
 
-**Reply drafts:** short and factual, in the reviewer's language. Say what changed, or why not. Use an empty reply for CI items and instructions.
+**Reply drafts:**
+
+- Write natural, plain English that does not sound generated. Keep it short and factual.
+- Name the specific change you made, or say why you made none.
+- Use an empty reply for CI items and instructions.
+- Do not add a header or quote the comment. The daemon adds the header and quotes conversation comments when it posts.
+- **Checklist items:** when `checklistOnly` is true, use an empty reply. The checked box is the answer, and the diff shows the rest. That holds however much there would be to tell: which approach you took, what the fix touched, or that nothing needed to change. Write a reply only when the comment has prose around its checklist lines (`checklistOnly` false). The daemon then quotes just that line.
 
 ## Pull requests I review
 

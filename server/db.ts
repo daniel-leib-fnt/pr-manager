@@ -72,6 +72,12 @@ export interface Comment {
   skip_reason: string | null;
   auto: number;
   note: string | null;
+  /** Text of the checklist line this item stands for; null for a whole comment. */
+  task: string | null;
+  /** JSON TaskSource of the comment holding the checklist line. */
+  task_source: string | null;
+  /** 1 when the reply asks the reviewer to clarify: no box is checked and the thread stays unresolved. */
+  clarify: number;
   created_at: string;
   updated_at: string;
 }
@@ -181,6 +187,9 @@ CREATE TABLE IF NOT EXISTS comments (
   skip_reason TEXT,
   auto INTEGER NOT NULL DEFAULT 0,
   note TEXT,
+  task TEXT,
+  task_source TEXT,
+  clarify INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
   updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
   UNIQUE (pr_id, gh_key)
@@ -233,10 +242,18 @@ export function openDb(path = join(config.stateDir, 'pr-manager.db')) {
   db.exec('PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;');
   db.exec(schema);
   // Columns added after the first release; CREATE TABLE IF NOT EXISTS does not add them.
-  const migrations: [string, string, string][] = [['prs', 'ignored', 'INTEGER NOT NULL DEFAULT 0']];
+  const migrations: [string, string, string][] = [
+    ['prs', 'ignored', 'INTEGER NOT NULL DEFAULT 0'],
+    ['comments', 'task', 'TEXT'],
+    ['comments', 'task_source', 'TEXT'],
+    ['comments', 'clarify', 'INTEGER NOT NULL DEFAULT 0'],
+  ];
   for (const [table, column, type] of migrations) {
     const cols = db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[];
-    if (!cols.some((c) => c.name === column)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`);
+    if (cols.some((c) => c.name === column)) continue;
+    db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`);
+    // Checklist items are new: re-read every PR once, so open boxes on unchanged PRs are found too.
+    if (column === 'task') db.exec(`UPDATE prs SET gh_updated_at = ''`);
   }
 
   const all = <T>(sql: string, ...params: SQLInputValue[]) => db.prepare(sql).all(...params) as unknown as T[];

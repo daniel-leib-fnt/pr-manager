@@ -123,6 +123,8 @@ function saveDraft(id: number, draft: Draft) {
                 @if (c.path) { <code>{{ c.path }}:{{ c.line }}</code> }
                 @if (c.url) { <a [href]="c.url" target="_blank" rel="noopener">GitHub</a> }
               </div>
+              @if (c.task) { <p class="task">☐ {{ c.task }}</p> }
+              @if (c.clarify) { <p class="muted">Clarifying reply: the thread stays unresolved and the box unchecked.</p> }
               <details><summary>Conversation</summary><p class="pre">{{ c.body }}</p></details>
               @if (c.note) { <p class="muted">{{ c.note }}</p> }
               <label>Proposal <textarea rows="4" [(ngModel)]="decision(c).proposal" (ngModelChange)="persist()"></textarea></label>
@@ -193,7 +195,7 @@ function saveDraft(id: number, draft: Draft) {
             @for (c of others(); track c.id) {
               <li>
                 <span class="chip" [class.need]="c.state === 'new' || c.state === 'accepted'">{{ label(c) }}</span>
-                <span class="chip">{{ c.kind }}</span>
+                <span class="chip">{{ c.task ? 'checklist' : c.kind }}</span>
                 @if (c.author) { &#64;{{ c.author }} }
                 @if (c.path) { <code>{{ c.path }}:{{ c.line }}</code> }
                 <details><summary>{{ headline(c) }}</summary>
@@ -289,6 +291,7 @@ export class PrPage {
 
   /** First line of the actual comment text, skipping the "@author (date):" header lines. */
   protected headline(c: Comment): string {
+    if (c.task) return c.task;
     const line = c.body.split('\n').find((l) => l.trim() && !/^@\S+ \(.*\):$/.test(l.trim()) && l.trim() !== '---');
     return (line ?? c.body).trim().slice(0, 140);
   }

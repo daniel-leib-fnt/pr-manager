@@ -7,6 +7,7 @@ A local daemon with a dashboard for my GitHub pull requests: the ones I authored
   - Anything bigger becomes an editable proposal on the dashboard, and open questions are asked there too.
   - I accept or skip proposals and answer questions, then submit them all at once, like a GitHub review.
   - When every item is fixed or skipped, the daemon rebases, pushes once with `--force-with-lease`, posts the replies and resolves the threads.
+  - Every unchecked checklist line (`- [ ] ...`) in a comment is an item of its own, and a box checked on GitHub closes it. When the batch closes, the daemon checks off fixed lines. A comment of nothing but checklist lines gets no reply, because the checked box is the answer.
 - **PRs I review:** the agent writes one review draft with findings and a suggested verdict. I edit and submit it.
   - New commits mark the review as out of date.
   - A follow-up review runs on demand, or automatically when my review is re-requested.

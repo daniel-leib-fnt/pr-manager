@@ -44,10 +44,19 @@ export function replyFor(c: Comment, viewer: string): string | null {
   return c.auto && header ? `${header}\n\n${text}` : text;
 }
 
-/** Threads resolved after the reply, as configured in resolveThreads. */
-export function shouldResolve(c: Comment): boolean {
+const settled = (c: Comment, mode: string) =>
+  !c.clarify && c.state === 'fixed' || c.state === 'done' || (mode === 'fixed_and_skipped_with_reason' && c.state === 'skipped' && !!c.skip_reason?.trim());
+
+/**
+ * Threads resolved after the reply, as configured in resolveThreads. A thread with checklist lines is
+ * resolved only once every item of it is settled, so the last one resolves it.
+ */
+export function shouldResolve(c: Comment, all: Comment[]): boolean {
   if (c.kind !== 'thread' || !c.thread_id) return false;
   const mode = setting('resolveThreads');
-  if (mode === 'never') return false;
-  return c.state === 'fixed' || (mode === 'fixed_and_skipped_with_reason' && c.state === 'skipped' && !!c.skip_reason?.trim());
+  if (mode === 'never' || !settled(c, mode)) return false;
+  const thread = all.filter((x) => x.thread_id === c.thread_id && x.state !== 'gone');
+  if (!thread.some((x) => x.task)) return true;
+  if (!thread.every((x) => settled(x, mode))) return false;
+  return thread.filter((x) => x.state === 'fixed' || x.state === 'skipped').at(-1)?.id === c.id;
 }

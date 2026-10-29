@@ -1,4 +1,5 @@
 import { batchStatus, buildGreen, readyToClose } from './batch.ts';
+import { type TaskSource, hasTasks, parseTasks, taskKeys } from './checklist.ts';
 import { config } from './config.ts';
 import { type Comment, type Db, type Pr, type PrState, now } from './db.ts';
 import { Blocked, removeWorktree } from './git.ts';
@@ -170,6 +171,9 @@ export function createPoller({ db, dashboardUrl, ownSessionIds, wake }: PollerDe
       const c = existing.get(key);
       if (!c) {
         if (t.isResolved || last.author?.login === me) continue;
+        // Checklist lines become items of their own (below); a thread row is only needed for plain text.
+        const lastMine = cs.findLastIndex((x) => x.author?.login === me);
+        if (cs.slice(lastMine + 1).every((x) => hasTasks(x.body))) continue;
         db.insert('comments', {
           pr_id: pr.id,
           kind: 'thread',
@@ -186,7 +190,7 @@ export function createPoller({ db, dashboardUrl, ownSessionIds, wake }: PollerDe
         added++;
       } else if (last.id !== c.last_seen_gh_id) {
         const idx = cs.findIndex((x) => x.id === c.last_seen_gh_id);
-        const fresh = cs.slice(idx + 1).filter((x) => x.author?.login !== me);
+        const fresh = cs.slice(idx + 1).filter((x) => x.author?.login !== me && !hasTasks(x.body));
         if (fresh.length === 0) {
           db.update('comments', c.id, { last_seen_gh_id: last.id });
         } else if (c.state === 'new' || c.state === 'accepted') {
@@ -204,10 +208,42 @@ export function createPoller({ db, dashboardUrl, ownSessionIds, wake }: PollerDe
       ...d.reviews.nodes.filter((r) => r.body.trim()).map((c) => ({ key: `review:${c.id}`, kind: 'review_body' as const, c })),
     ];
     for (const { key, kind, c } of flat) {
-      if (c.author?.login === me || existing.has(key)) continue;
+      if (c.author?.login === me || existing.has(key) || hasTasks(c.body)) continue;
       if (firstIngest && c.createdAt <= myLast) continue;
       db.insert('comments', { pr_id: pr.id, kind, gh_key: key, author: c.author?.login ?? null, body: c.body, url: c.url });
       added++;
+    }
+
+    // Each unchecked checklist line is an item of its own, whoever replied since; a checked box closes it.
+    const sources: { source: TaskSource; kind: 'thread' | 'issue_comment' | 'review_body'; c: GhComment; thread?: (typeof d.reviewThreads.nodes)[number] }[] = [
+      ...d.comments.nodes.map((c) => ({ source: { type: 'issue_comment' as const, id: c.databaseId }, kind: 'issue_comment' as const, c })),
+      ...d.reviews.nodes.map((c) => ({ source: { type: 'review' as const, id: c.databaseId }, kind: 'review_body' as const, c })),
+      ...d.reviewThreads.nodes.flatMap((t) => t.comments.nodes.map((c) => ({ source: { type: 'review_comment' as const, id: c.databaseId }, kind: 'thread' as const, c, thread: t }))),
+    ];
+    for (const { source, kind, c, thread } of sources) {
+      if (c.author?.login === me) continue;
+      const tasks = parseTasks(c.body);
+      const keys = taskKeys(`${source.type}:${source.id}`, tasks);
+      tasks.forEach((task, i) => {
+        const row = existing.get(keys[i]);
+        if (task.checked) {
+          if (row && (row.state === 'new' || row.state === 'proposal')) db.update('comments', row.id, { state: 'done', note: 'Checked on GitHub.' });
+          return;
+        }
+        if (row || thread?.isResolved) return;
+        db.insert('comments', {
+          pr_id: pr.id,
+          kind,
+          gh_key: keys[i],
+          author: c.author?.login ?? null,
+          body: c.body,
+          url: c.url,
+          task: task.text,
+          task_source: JSON.stringify(source),
+          ...(thread ? { thread_id: thread.id, reply_to_db_id: c.databaseId, path: thread.path, line: thread.line ?? thread.originalLine } : {}),
+        });
+        added++;
+      });
     }
 
     const { pending, failed } = failedChecks(d);
