@@ -220,12 +220,15 @@ export async function removeWorktree(pr: Pr, ownSessionIds: Set<string>) {
   if (!path || !existsSync(path)) return;
   if (await isDirty(path)) throw new Blocked(`Worktree ${path} has uncommitted changes.`);
   const clone = clonePath(pr.repo);
-  if (!(await gitOk(clone, ['cat-file', '-e', `${pr.head_sha}^{commit}`]))) {
-    await gitNet(pr.repo, clone, ['fetch', '--no-tags', httpsUrl(pr.repo), `+refs/pull/${pr.number}/head:refs/remotes/origin/pr/${pr.number}`]);
-  }
-  const head = await git(path, ['rev-parse', 'HEAD']);
-  if (head !== pr.head_sha && !(await isAncestor(path, head, pr.head_sha))) {
-    throw new Blocked(`Worktree ${path} holds commits that were never pushed.`);
+  // A review worktree holds no work of mine; commits missing upstream are the author's, from before a force push.
+  if (pr.role === 'own') {
+    if (!(await gitOk(clone, ['cat-file', '-e', `${pr.head_sha}^{commit}`]))) {
+      await gitNet(pr.repo, clone, ['fetch', '--no-tags', httpsUrl(pr.repo), `+refs/pull/${pr.number}/head:refs/remotes/origin/pr/${pr.number}`]);
+    }
+    const head = await git(path, ['rev-parse', 'HEAD']);
+    if (head !== pr.head_sha && !(await isAncestor(path, head, pr.head_sha))) {
+      throw new Blocked(`Worktree ${path} holds commits that were never pushed.`);
+    }
   }
   const sessions = interactiveSessionsIn(path, ownSessionIds);
   if (sessions.length) throw new Blocked(`An interactive Claude session (${sessions[0].name ?? sessions[0].sessionId}) runs in ${path}.`);

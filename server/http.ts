@@ -135,6 +135,7 @@ export function createHttp({ db, poller, runner }: { db: Db; poller: Poller; run
       if (pr.role !== 'review') throw new Error('Only reviews can be ignored.');
       db.update('prs', pr.id, { ignored: 1 });
       changed(pr.id);
+      await poller.discard(db.pr(pr.id)!);
     },
     'POST unignore': async (_q, _r, pr) => {
       db.update('prs', pr.id, { ignored: 0 });

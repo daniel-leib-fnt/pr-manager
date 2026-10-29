@@ -12,6 +12,7 @@ A local daemon with a dashboard for my GitHub pull requests: the ones I authored
   - A PR that GitHub reports as approved and mergeable, with nothing open in pr-manager, moves to the top section "Ready to merge". If it loses that state, for example through a new review or a failed check, the daemon reads it again right away.
 - **PRs I review:** the agent writes one review draft with findings and a suggested verdict. I edit and submit it.
   - New commits mark the review as out of date.
+  - An ignored review moves to the "Ignored" section and loses its worktree and agent session; when I stop ignoring it, both start afresh.
   - A follow-up review runs on demand, or automatically when my review is re-requested.
 - **Notifications:** a desktop notification appears when I am needed: a proposal or question waits, a review draft is ready, a PR is blocked, or something failed.
 

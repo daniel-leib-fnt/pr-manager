@@ -1,3 +1,4 @@
+import { deleteSession } from '@anthropic-ai/claude-agent-sdk';
 import { batchStatus, buildGreen, readyToClose } from './batch.ts';
 import { type TaskSource, hasTasks, parseTasks, taskKeys } from './checklist.ts';
 import { config } from './config.ts';
@@ -74,6 +75,7 @@ export function createPoller({ db, dashboardUrl, ownSessionIds, wake }: PollerDe
         console.error(`poll ${gh.url}:`, e);
       }
     }
+    for (const pr of db.all<Pr>(`SELECT * FROM prs WHERE ignored = 1 AND (worktree IS NOT NULL OR session_id IS NOT NULL)`)) await discard(pr);
     db.kvSet('lastPoll', now());
     checkBatches();
     wake();
@@ -153,6 +155,24 @@ export function createPoller({ db, dashboardUrl, ownSessionIds, wake }: PollerDe
       if (e instanceof Blocked) notify('blocked', `Cleanup blocked: ${pr.repo}#${pr.number}`, errorMessage(e), prUrl(pr), `cleanup:${pr.id}`);
       else throw e;
     }
+    changed(pr.id);
+  }
+
+  /** An ignored review keeps no worktree and no agent session; when I stop ignoring it, both start afresh. */
+  async function discard(pr: Pr) {
+    if (pr.agent_running || (!pr.worktree && !pr.session_id)) return;
+    try {
+      await removeWorktree(pr, ownSessionIds());
+    } catch (e) {
+      if (!(e instanceof Blocked)) throw e;
+      notify('blocked', `Cleanup blocked: ${pr.repo}#${pr.number}`, errorMessage(e), prUrl(pr), `cleanup:${pr.id}`);
+      return;
+    }
+    if (pr.session_id) {
+      await deleteSession(pr.session_id, pr.worktree ? { dir: pr.worktree } : undefined).catch((e) => console.error(`delete session of ${pr.url}:`, errorMessage(e)));
+    }
+    db.update('prs', pr.id, { worktree: null, session_id: null });
+    clearNotification(`cleanup:${pr.id}`);
     changed(pr.id);
   }
 
@@ -366,6 +386,7 @@ export function createPoller({ db, dashboardUrl, ownSessionIds, wake }: PollerDe
     pollNow: () => tick(true),
     ingest,
     cleanup,
+    discard,
     viewer,
     checkBatches,
   };
