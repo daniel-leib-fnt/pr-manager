@@ -9,6 +9,7 @@ import type { Db, Pr } from './db.ts';
 import { findingUrl } from './github.ts';
 import type { Poller } from './poller.ts';
 import type { Runner } from './runner.ts';
+import { deniedCalls, describeNixOnly, describeSettings, isExcluded, resetOverride, saveOverrides } from './settings.ts';
 import { bus, changed, clearNotification, errorMessage } from './util.ts';
 
 export type Group = 'needs_me' | 'working' | 'queued' | 'blocked' | 'out_of_date' | 'waiting' | 'ignored' | 'closed';
@@ -26,12 +27,12 @@ export function groupOf(db: Db, pr: Pr): Group {
   return 'waiting';
 }
 
-function summary(db: Db, pr: Pr, runningId: number | undefined) {
+function summary(db: Db, pr: Pr, running: boolean) {
   const comments = db.comments(pr.id);
   return {
     ...pr,
     group: groupOf(db, pr),
-    running: runningId === pr.id,
+    running,
     counts: {
       proposals: comments.filter((c) => c.state === 'proposal').length,
       questions: db.questions(pr.id).filter((q) => q.state === 'open').length,
@@ -82,7 +83,7 @@ export function createHttp({ db, poller, runner }: { db: Db; poller: Poller; run
 
   const prRoutes: Record<string, Handler> = {
     'GET ': async (_q, _r, pr) => ({
-      pr: summary(db, pr, runner.current()),
+      pr: summary(db, pr, runner.isRunning(pr.id)),
       comments: db.comments(pr.id),
       questions: db.questions(pr.id),
       findings: db.findings(pr.id).map((f) => ({ ...f, url: findingUrl(pr, f) })),
@@ -168,7 +169,24 @@ export function createHttp({ db, poller, runner }: { db: Db; poller: Poller; run
         return;
       }
       if (path === '/api/prs' && req.method === 'GET') {
-        return send(res, 200, { prs: db.prs().map((p) => summary(db, p, runner.current())), lastPoll: db.kvGet('lastPoll') ?? null });
+        const prs = db.prs().filter((p) => !isExcluded(p.repo));
+        return send(res, 200, { prs: prs.map((p) => summary(db, p, runner.isRunning(p.id))), lastPoll: db.kvGet('lastPoll') ?? null });
+      }
+      if (path === '/api/settings' && req.method === 'GET') {
+        return send(res, 200, { settings: describeSettings(), nixOnly: describeNixOnly(), denied: deniedCalls() });
+      }
+      if (path === '/api/settings' && req.method === 'PUT') {
+        try {
+          saveOverrides(await readJson<Record<string, unknown>>(req));
+        } catch (e) {
+          return send(res, 400, { error: errorMessage(e) });
+        }
+        return send(res, 200, { settings: describeSettings() });
+      }
+      const reset = /^\/api\/settings\/([A-Za-z]+)$/.exec(path);
+      if (reset && req.method === 'DELETE') {
+        resetOverride(reset[1]);
+        return send(res, 200, { settings: describeSettings() });
       }
       if (path === '/api/poll' && req.method === 'POST') {
         await poller.pollNow();

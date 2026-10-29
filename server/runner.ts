@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync } from 'node:fs';
+import { existsSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { type Options, type SDKResultMessage, query } from '@anthropic-ai/claude-agent-sdk';
 import { AGENT_TOOL_SERVER, createAgentTools } from './agent-tools.ts';
@@ -9,6 +9,7 @@ import { config } from './config.ts';
 import { type Db, type Pr, type WorkItem, type WorkKind, now } from './db.ts';
 import { Blocked, ensureWorktree, fetchBase, git, interactiveSessionsIn, isDirty, sync } from './git.ts';
 import type { Poller } from './poller.ts';
+import { isExcluded, recordDenied, setting, workflowPrompt } from './settings.ts';
 import { bus, changed, errorMessage, notify } from './util.ts';
 
 /** Lower runs first. Answers to my input beat new work; batch closing beats both. */
@@ -16,6 +17,15 @@ const PRIORITY: Record<WorkKind, number> = { close_batch: 0, rebase: 1, answers:
 
 /** Defense in depth; the real guard is that the session has no credentials (see agentEnv). */
 const DENY = ['Bash(git push *)', 'Bash(git push)', 'Bash(gh *)', 'Bash(gh)', 'Bash(curl *)', 'Bash(wget *)'];
+
+type Candidate = Pick<WorkItem, 'id' | 'pr_id' | 'kind'> & { check_state: string | null; repo: string };
+
+/** The PR whose queued work runs next: highest priority first, never a PR that already runs. */
+export function selectNext(rows: Candidate[], running: Set<number>): number | undefined {
+  const eligible = rows.filter((w) => !running.has(w.pr_id) && runnable(w, w.kind) && !isExcluded(w.repo));
+  eligible.sort((a, b) => PRIORITY[a.kind] - PRIORITY[b.kind] || a.id - b.id);
+  return eligible[0]?.pr_id;
+}
 
 export interface RunnerDeps {
   db: Db;
@@ -26,16 +36,15 @@ export interface RunnerDeps {
 export type Runner = ReturnType<typeof createRunner>;
 
 export function createRunner({ db, poller, dashboardUrl }: RunnerDeps) {
-  let busy = false;
-  let rerun = false;
-  let current: { prId: number; abort: AbortController } | undefined;
+  /** Runs in flight, keyed by PR id; at most maxParallelSessions, never two for one PR. */
+  const running = new Map<number, AbortController>();
 
   const prUrl = (pr: Pr) => `${dashboardUrl}/pr/${pr.id}`;
   const ownSessionIds = () => new Set(db.all<{ session_id: string }>('SELECT session_id FROM prs WHERE session_id IS NOT NULL').map((r) => r.session_id));
 
   function block(pr: Pr, reason: string) {
     db.update('prs', pr.id, { blocked: reason });
-    notify(`Blocked: ${pr.repo}#${pr.number}`, reason, prUrl(pr), `blocked:${pr.id}`);
+    notify('blocked', `Blocked: ${pr.repo}#${pr.number}`, reason, prUrl(pr), `blocked:${pr.id}`);
     changed(pr.id);
   }
 
@@ -60,14 +69,12 @@ export function createRunner({ db, poller, dashboardUrl }: RunnerDeps) {
   }
 
   function nextPr(): Pr | undefined {
-    const rows = db
-      .all<WorkItem & { check_state: string | null }>(
-        `SELECT w.*, p.check_state FROM work_items w JOIN prs p ON p.id = w.pr_id
-         WHERE w.state = 'queued' AND p.state = 'open' AND p.paused = 0 AND p.ignored = 0 AND p.blocked IS NULL`,
-      )
-      .filter((w) => runnable(w, w.kind));
-    rows.sort((a, b) => PRIORITY[a.kind] - PRIORITY[b.kind] || a.id - b.id);
-    return rows[0] ? db.pr(rows[0].pr_id) : undefined;
+    const rows = db.all<Candidate>(
+      `SELECT w.id, w.pr_id, w.kind, p.check_state, p.repo FROM work_items w JOIN prs p ON p.id = w.pr_id
+       WHERE w.state = 'queued' AND p.state = 'open' AND p.paused = 0 AND p.ignored = 0 AND p.blocked IS NULL`,
+    );
+    const id = selectNext(rows, new Set(running.keys()));
+    return id === undefined ? undefined : db.pr(id);
   }
 
   /** Makes sure the worktree exists, nobody else works in it, and it sits on the PR head. */
@@ -131,8 +138,8 @@ export function createRunner({ db, poller, dashboardUrl }: RunnerDeps) {
     db.update('prs', pr.id, { session_id: sessionId, agent_running: 1, interrupted: 0 });
     changed(pr.id);
 
-    const abort = new AbortController();
-    current = { prId: pr.id, abort };
+    const abort = running.get(pr.id) ?? new AbortController();
+    const model = setting('model').trim();
     let result: SDKResultMessage | undefined;
     let error: string | undefined;
     try {
@@ -143,7 +150,8 @@ export function createRunner({ db, poller, dashboardUrl }: RunnerDeps) {
         pathToClaudeCodeExecutable: config.claudePath,
         settingSources: ['user', 'project'],
         permissionMode: 'acceptEdits',
-        allowedTools: [...config.allowedTools, `mcp__${AGENT_TOOL_SERVER}`],
+        ...(model ? { model } : {}),
+        allowedTools: [...setting('allowedTools'), `mcp__${AGENT_TOOL_SERVER}`],
         disallowedTools: ['AskUserQuestion'],
         settings: { permissions: { deny: DENY } },
         strictMcpConfig: true,
@@ -152,12 +160,13 @@ export function createRunner({ db, poller, dashboardUrl }: RunnerDeps) {
           const detail = name === 'Bash' ? String((input as { command?: unknown }).command ?? '') : JSON.stringify(input).slice(0, 200);
           console.warn(`denied tool for ${pr.repo}#${pr.number}: ${name} ${detail}`);
           bus.emit('event', { type: 'denied', prId: pr.id, tool: name, detail, at: now() });
+          recordDenied({ at: now(), pr: `${pr.repo}#${pr.number}`, tool: name, detail });
           return { behavior: 'deny', message: `${name} is not allowed in pr-manager sessions. Continue without it; if it blocks you, say so in your final message.` };
         },
         env: agentEnv(),
-        maxTurns: config.maxTurns,
-        maxBudgetUsd: config.maxBudgetUsd,
-        systemPrompt: { type: 'preset', preset: 'claude_code', append: readFileSync(config.promptFile, 'utf8') },
+        maxTurns: setting('maxTurns'),
+        maxBudgetUsd: setting('maxBudgetUsd'),
+        systemPrompt: { type: 'preset', preset: 'claude_code', append: workflowPrompt() },
         stderr: (d) => process.stderr.write(`[${pr.repo}#${pr.number}] ${d}`),
       };
       for await (const message of query({ prompt: text, options })) {
@@ -168,8 +177,6 @@ export function createRunner({ db, poller, dashboardUrl }: RunnerDeps) {
       else if (result.subtype !== 'success' || result.is_error) error = `Session ended with ${result.subtype}${'result' in result ? `: ${result.result}` : ''}`;
     } catch (e) {
       error = errorMessage(e);
-    } finally {
-      current = undefined;
     }
 
     const dirty = await isDirty(path).catch(() => false);
@@ -179,7 +186,7 @@ export function createRunner({ db, poller, dashboardUrl }: RunnerDeps) {
       for (const id of answeredIds) db.update('questions', id, { state: 'sent' });
       afterRun(db.pr(pr.id)!, kinds);
     } else {
-      notify(`Agent error: ${pr.repo}#${pr.number}`, error.slice(0, 300), prUrl(pr), `agent-error:${pr.id}`);
+      notify('error', `Agent error: ${pr.repo}#${pr.number}`, error.slice(0, 300), prUrl(pr), `agent-error:${pr.id}`);
     }
     changed(pr.id);
   }
@@ -195,11 +202,11 @@ export function createRunner({ db, poller, dashboardUrl }: RunnerDeps) {
     }
     if (kinds.has('review') || kinds.has('followup_review')) {
       db.update('prs', pr.id, { review_state: 'draft' });
-      if (!pr.ignored) notify(`Review draft ready: ${pr.repo}#${pr.number}`, pr.title, prUrl(pr));
+      if (!pr.ignored) notify('review_draft', `Review draft ready: ${pr.repo}#${pr.number}`, pr.title, prUrl(pr));
       return;
     }
     const waiting = db.comments(pr.id).filter((c) => c.state === 'proposal').length + db.questions(pr.id).filter((q) => q.state === 'open').length;
-    if (waiting) notify(`Input needed: ${pr.repo}#${pr.number}`, `${waiting} item(s) wait for you: ${pr.title}`, prUrl(pr));
+    if (waiting) notify('input', `Input needed: ${pr.repo}#${pr.number}`, `${waiting} item(s) wait for you: ${pr.title}`, prUrl(pr));
     poller.checkBatches();
   }
 
@@ -213,7 +220,7 @@ export function createRunner({ db, poller, dashboardUrl }: RunnerDeps) {
         db.update('work_items', close.id, { state: 'done', finished_at: now() });
       } catch (e) {
         db.update('work_items', close.id, { state: 'failed', error: errorMessage(e), finished_at: now() });
-        notify(`Push failed: ${pr.repo}#${pr.number}`, errorMessage(e).slice(0, 300), prUrl(pr), `close-error:${pr.id}`);
+        notify('error', `Push failed: ${pr.repo}#${pr.number}`, errorMessage(e).slice(0, 300), prUrl(pr), `close-error:${pr.id}`);
       }
       changed(pr.id);
       return;
@@ -221,31 +228,28 @@ export function createRunner({ db, poller, dashboardUrl }: RunnerDeps) {
     await runSession(pr, queued);
   }
 
-  async function tick() {
-    if (busy) {
-      rerun = true;
-      return;
+  function failed(pr: Pr, e: unknown) {
+    console.error(`runner ${pr.repo}#${pr.number}:`, e);
+    for (const w of db.workItems(pr.id).filter((x) => x.state === 'in_progress')) {
+      db.update('work_items', w.id, { state: 'failed', error: errorMessage(e), finished_at: now() });
     }
-    busy = true;
-    try {
-      do {
-        rerun = false;
-        for (let pr = nextPr(); pr; pr = nextPr()) {
-          try {
-            await processPr(pr);
-          } catch (e) {
-            console.error(`runner ${pr.repo}#${pr.number}:`, e);
-            for (const w of db.workItems(pr.id).filter((x) => x.state !== 'done' && x.state !== 'failed')) {
-              db.update('work_items', w.id, { state: 'failed', error: errorMessage(e), finished_at: now() });
-            }
-            db.update('prs', pr.id, { agent_running: 0 });
-            notify(`Agent error: ${pr.repo}#${pr.number}`, errorMessage(e).slice(0, 300), prUrl(pr), `agent-error:${pr.id}`);
-            changed(pr.id);
-          }
-        }
-      } while (rerun);
-    } finally {
-      busy = false;
+    db.update('prs', pr.id, { agent_running: 0 });
+    notify('error', `Agent error: ${pr.repo}#${pr.number}`, errorMessage(e).slice(0, 300), prUrl(pr), `agent-error:${pr.id}`);
+  }
+
+  /** Starts queued work until the pool is full. Lowering the limit only stops new starts. */
+  function tick() {
+    while (running.size < setting('maxParallelSessions')) {
+      const pr = nextPr();
+      if (!pr) return;
+      running.set(pr.id, new AbortController());
+      void processPr(pr)
+        .catch((e) => failed(pr, e))
+        .finally(() => {
+          running.delete(pr.id);
+          changed(pr.id);
+          tick();
+        });
     }
   }
 
@@ -256,16 +260,17 @@ export function createRunner({ db, poller, dashboardUrl }: RunnerDeps) {
       db.run(`UPDATE prs SET interrupted = 1, dirty_by_agent = 1, agent_running = 0 WHERE agent_running = 1`);
     },
     wake() {
-      setImmediate(() => void tick());
+      setImmediate(tick);
     },
     start() {
-      setInterval(() => void tick(), 15_000).unref();
-      void tick();
+      setInterval(tick, 15_000).unref();
+      bus.on('settings', () => setImmediate(tick));
+      tick();
     },
     stop() {
-      current?.abort.abort();
+      for (const abort of running.values()) abort.abort();
     },
-    current: () => current?.prId,
+    isRunning: (prId: number) => running.has(prId),
     ownSessionIds,
   };
 }

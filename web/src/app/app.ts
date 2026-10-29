@@ -9,6 +9,7 @@ import { Api } from './api';
     <header class="top">
       <a routerLink="/" class="brand">pr-manager</a>
       <span class="conn" [class.off]="!api.connected()">{{ api.connected() ? 'live' : 'offline' }}</span>
+      <a routerLink="/settings" class="nav-right">Settings</a>
     </header>
     <main><router-outlet /></main>
   `,

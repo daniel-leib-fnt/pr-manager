@@ -12,11 +12,27 @@ export const git = async (cwd: string, args: string[]) => (await run('git', args
 
 const gitOk = (cwd: string, args: string[]) => git(cwd, args).then(() => true, () => false);
 
+const locks = new Map<string, Promise<unknown>>();
+
+/**
+ * Runs git operations that touch a clone's shared refs or worktree list one at a time per
+ * repository, so parallel sessions on PRs of the same repository do not fight over ref locks.
+ */
+function serial<T>(key: string, fn: () => Promise<T>): Promise<T> {
+  const next = (locks.get(key) ?? Promise.resolve()).then(fn, fn);
+  locks.set(key, next.catch(() => undefined));
+  return next;
+}
+
 /**
  * Network git runs over HTTPS with the gh token, so the daemon does not depend on an SSH
  * agent being reachable from the systemd user service.
  */
-async function gitNet(cwd: string, args: string[]) {
+async function gitNet(repo: string, cwd: string, args: string[]) {
+  return serial(repo, () => gitNetNow(cwd, args));
+}
+
+async function gitNetNow(cwd: string, args: string[]) {
   const basic = Buffer.from(`x-access-token:${await token()}`).toString('base64');
   return git(cwd, ['-c', `http.https://github.com/.extraheader=AUTHORIZATION: basic ${basic}`, ...args]);
 }
@@ -25,14 +41,23 @@ const httpsUrl = (repo: string) => `https://github.com/${repo}.git`;
 
 export const clonePath = (repo: string) => join(config.srcRoot, repo);
 
-export const worktreePath = (repo: string, branch: string) => join(`${clonePath(repo)}.worktrees`, branch.replaceAll('/', '-'));
+export const worktreePath = (repo: string, branch: string) => {
+  const [owner, name] = repo.split('/');
+  return config.worktreeDir
+    .replaceAll('{clone}', clonePath(repo))
+    .replaceAll('{owner}', owner)
+    .replaceAll('{repo}', name)
+    .replaceAll('{branch}', branch.replaceAll('/', '-'));
+};
 
-export async function ensureClone(repo: string): Promise<string> {
-  const path = clonePath(repo);
-  if (existsSync(join(path, '.git'))) return path;
-  await gitNet(config.srcRoot, ['clone', httpsUrl(repo), path]);
-  await git(path, ['remote', 'set-url', 'origin', `git@github.com:${repo}.git`]);
-  return path;
+export function ensureClone(repo: string): Promise<string> {
+  return serial(repo, async () => {
+    const path = clonePath(repo);
+    if (existsSync(join(path, '.git'))) return path;
+    await gitNetNow(config.srcRoot, ['clone', httpsUrl(repo), path]);
+    await git(path, ['remote', 'set-url', 'origin', `git@github.com:${repo}.git`]);
+    return path;
+  });
 }
 
 /** The ref that holds the PR head after `fetchHead`. Fork heads come from the pull ref. */
@@ -40,11 +65,11 @@ export const remoteHeadRef = (pr: Pr) => (pr.is_cross_repo ? `refs/remotes/origi
 
 export async function fetchHead(cwd: string, pr: Pr) {
   const src = pr.is_cross_repo ? `refs/pull/${pr.number}/head` : `refs/heads/${pr.head_ref}`;
-  await gitNet(cwd, ['fetch', '--no-tags', httpsUrl(pr.repo), `+${src}:${remoteHeadRef(pr)}`]);
+  await gitNet(pr.repo, cwd, ['fetch', '--no-tags', httpsUrl(pr.repo), `+${src}:${remoteHeadRef(pr)}`]);
 }
 
 export async function fetchBase(cwd: string, pr: Pr) {
-  await gitNet(cwd, ['fetch', '--no-tags', httpsUrl(pr.repo), `+refs/heads/${pr.base_ref}:refs/remotes/origin/${pr.base_ref}`]);
+  await gitNet(pr.repo, cwd, ['fetch', '--no-tags', httpsUrl(pr.repo), `+refs/heads/${pr.base_ref}:refs/remotes/origin/${pr.base_ref}`]);
 }
 
 interface WorktreeEntry {
@@ -77,11 +102,13 @@ export async function ensureWorktree(pr: Pr): Promise<string> {
   }
   const path = worktreePath(pr.repo, branch);
   if (existsSync(path)) throw new Blocked(`${path} exists but does not hold branch ${branch}.`);
-  if (await gitOk(clone, ['rev-parse', '--verify', '--quiet', `refs/heads/${branch}`])) {
-    await git(clone, ['worktree', 'add', path, branch]);
-  } else {
-    await git(clone, ['worktree', 'add', pr.is_cross_repo ? '--no-track' : '--track', '-b', branch, path, remoteHeadRef(pr)]);
-  }
+  await serial(pr.repo, async () => {
+    if (await gitOk(clone, ['rev-parse', '--verify', '--quiet', `refs/heads/${branch}`])) {
+      await git(clone, ['worktree', 'add', path, branch]);
+    } else {
+      await git(clone, ['worktree', 'add', pr.is_cross_repo ? '--no-track' : '--track', '-b', branch, path, remoteHeadRef(pr)]);
+    }
+  });
   return path;
 }
 
@@ -127,7 +154,7 @@ export async function localChanged(pr: Pr, path: string): Promise<boolean> {
 }
 
 export async function push(pr: Pr, path: string, expectedSha: string): Promise<string> {
-  await gitNet(path, ['push', `--force-with-lease=refs/heads/${pr.head_ref}:${expectedSha}`, httpsUrl(pr.repo), `HEAD:refs/heads/${pr.head_ref}`]);
+  await gitNet(pr.repo, path, ['push', `--force-with-lease=refs/heads/${pr.head_ref}:${expectedSha}`, httpsUrl(pr.repo), `HEAD:refs/heads/${pr.head_ref}`]);
   await git(path, ['update-ref', remoteHeadRef(pr), 'HEAD']);
   return git(path, ['rev-parse', 'HEAD']);
 }
@@ -170,7 +197,7 @@ export async function removeWorktree(pr: Pr, ownSessionIds: Set<string>) {
   if (await isDirty(path)) throw new Blocked(`Worktree ${path} has uncommitted changes.`);
   const clone = clonePath(pr.repo);
   if (!(await gitOk(clone, ['cat-file', '-e', `${pr.head_sha}^{commit}`]))) {
-    await gitNet(clone, ['fetch', '--no-tags', httpsUrl(pr.repo), `+refs/pull/${pr.number}/head:refs/remotes/origin/pr/${pr.number}`]);
+    await gitNet(pr.repo, clone, ['fetch', '--no-tags', httpsUrl(pr.repo), `+refs/pull/${pr.number}/head:refs/remotes/origin/pr/${pr.number}`]);
   }
   const head = await git(path, ['rev-parse', 'HEAD']);
   if (head !== pr.head_sha && !(await isAncestor(path, head, pr.head_sha))) {
@@ -178,6 +205,8 @@ export async function removeWorktree(pr: Pr, ownSessionIds: Set<string>) {
   }
   const sessions = interactiveSessionsIn(path, ownSessionIds);
   if (sessions.length) throw new Blocked(`An interactive Claude session (${sessions[0].name ?? sessions[0].sessionId}) runs in ${path}.`);
-  await git(clone, ['worktree', 'remove', path]);
-  await gitOk(clone, ['branch', '-D', pr.head_ref]);
+  await serial(pr.repo, async () => {
+    await git(clone, ['worktree', 'remove', path]);
+    await gitOk(clone, ['branch', '-D', pr.head_ref]);
+  });
 }

@@ -90,6 +90,33 @@ export interface PrDetail {
   work: WorkItem[];
 }
 
+export interface Setting {
+  key: string;
+  group: string;
+  label: string;
+  help: string | null;
+  type: 'number' | 'boolean' | 'string' | 'text' | 'list' | 'enum' | 'multi' | 'days';
+  options: { value: string; label: string }[] | null;
+  value: unknown;
+  source: 'override' | 'nix' | 'default';
+  nixValue: unknown;
+  defaultValue: unknown;
+}
+
+export interface NixOnly {
+  label: string;
+  value: string;
+  option: string;
+}
+
+export interface DeniedCall {
+  at: string;
+  pr: string;
+  tool: string;
+  detail: string;
+  rule: string;
+}
+
 export interface LiveEvent {
   type: 'pr' | 'message' | 'denied';
   prId: number;
@@ -140,6 +167,18 @@ export class Api {
 
   action(id: number, name: string, body: unknown = {}) {
     return firstValueFrom(this.http.post<unknown>(`/api/prs/${id}/${name}`, body));
+  }
+
+  settings() {
+    return firstValueFrom(this.http.get<{ settings: Setting[]; nixOnly: NixOnly[]; denied: DeniedCall[] }>('/api/settings'));
+  }
+
+  saveSettings(values: Record<string, unknown>) {
+    return firstValueFrom(this.http.put<{ settings: Setting[] }>('/api/settings', values));
+  }
+
+  resetSetting(key: string) {
+    return firstValueFrom(this.http.delete<{ settings: Setting[] }>(`/api/settings/${key}`));
   }
 
   pollNow() {

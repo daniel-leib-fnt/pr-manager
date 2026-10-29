@@ -3,9 +3,11 @@ import { openDb } from './db.ts';
 import { createHttp } from './http.ts';
 import { createPoller } from './poller.ts';
 import { createRunner } from './runner.ts';
+import { initSettings } from './settings.ts';
 
 const dashboardUrl = `http://127.0.0.1:${config.port}`;
 const db = openDb();
+initSettings(db);
 
 // The poller and the runner need each other; the runner is created right below.
 let wake = () => {};

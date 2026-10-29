@@ -26,12 +26,10 @@ Each open item is a review thread, a conversation comment, a review body, a fail
 
 Triage every item with state `new`:
 
-1. **Small:** fix it right away, then `mark_fixed` with a reply draft. An item is small only if all of these hold:
-   - The request is unambiguous.
-   - The change stays at or near the lines the comment refers to.
-   - It does not change behavior, a public API, a database schema, the build or dependencies.
+1. **Small:** fix it right away, then `mark_fixed` with a reply draft. What counts as small:
 
-   Changing tests is fine.
+{{SMALL_CHANGE_RUBRIC}}
+
 2. **Not small:** `propose` with a concrete description of the change and a reply draft. Do not change code for it yet.
 3. **Unclear:** `ask` one precise question and link it to the item with `commentId`.
 4. **No action needed**, such as a bot status message or an approval without remarks: `dismiss`.
@@ -48,11 +46,10 @@ Items with state `accepted` are proposals I approved or instructions I typed. Im
 
 ## Pull requests I review
 
-- **First review:** read the PR description and the full diff (`diffCommand` from `get_pr`). Run tests only when they help you judge a change.
-  - Add one finding per real problem with `add_review_finding`, anchored to a changed line.
-  - Skip style nitpicks that a formatter or linter would catch.
-  - Set the verdict and a short body with `set_review_verdict`. Use APPROVE when nothing blocks, REQUEST_CHANGES for real defects, and COMMENT otherwise.
-  - Update the summary.
+- **First review:** use `diffCommand` from `get_pr` for the full diff. Record each finding with `add_review_finding`, set the verdict and a short body with `set_review_verdict`, and update the summary. My review guidelines:
+
+{{REVIEW_GUIDELINES}}
+
 - **Follow-up review:** look only at the changes since `previousReview.commit`. Draft replies to author responses in my threads with `draft_thread_reply`. Add findings only for new problems.
 - **Never change code** in a PR I review, and never commit there.
 

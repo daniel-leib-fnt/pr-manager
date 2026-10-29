@@ -1,7 +1,9 @@
 import type { Comment, Pr, Question, WorkItem, WorkKind } from './db.ts';
+import { setting } from './settings.ts';
 
-/** Reviews wait for a green build. A PR without checks counts as green. */
-export const buildGreen = (pr: Pick<Pr, 'check_state'>) => !pr.check_state || pr.check_state === 'SUCCESS';
+/** Whether a review may start: a green build, or no checks, or waiting is switched off. */
+export const buildGreen = (pr: Pick<Pr, 'check_state'>) =>
+  !setting('reviewWaitForGreenBuild') || !pr.check_state || pr.check_state === 'SUCCESS';
 
 const REVIEW_KINDS = new Set<WorkKind>(['review', 'followup_review']);
 
@@ -38,11 +40,14 @@ export function replyFor(c: Comment, viewer: string): string | null {
   if (c.state === 'skipped') text = c.skip_reason?.trim() || null;
   if (!text) return null;
   // Text I never saw carries the header; anything I approved or edited is mine.
-  return c.auto ? `🤖 **Claude on behalf of @${viewer}**\n\n${text}` : text;
+  const header = setting('replyHeader').replaceAll('{viewer}', viewer).trim();
+  return c.auto && header ? `${header}\n\n${text}` : text;
 }
 
-/** Threads resolved after the reply: fixed ones and skipped ones with a reason. */
+/** Threads resolved after the reply, as configured in resolveThreads. */
 export function shouldResolve(c: Comment): boolean {
   if (c.kind !== 'thread' || !c.thread_id) return false;
-  return c.state === 'fixed' || (c.state === 'skipped' && !!c.skip_reason?.trim());
+  const mode = setting('resolveThreads');
+  if (mode === 'never') return false;
+  return c.state === 'fixed' || (mode === 'fixed_and_skipped_with_reason' && c.state === 'skipped' && !!c.skip_reason?.trim());
 }

@@ -1,5 +1,5 @@
 import { batchStatus, buildGreen, readyToClose } from './batch.ts';
-import { config, inPollWindow } from './config.ts';
+import { config } from './config.ts';
 import { type Comment, type Db, type Pr, type PrState, now } from './db.ts';
 import { Blocked, removeWorktree } from './git.ts';
 import {
@@ -14,7 +14,8 @@ import {
   searchPrs,
   viewerLogin,
 } from './github.ts';
-import { changed, clearNotification, errorMessage, notify } from './util.ts';
+import { inPollWindow, isExcluded, setting } from './settings.ts';
+import { bus, changed, clearNotification, errorMessage, notify } from './util.ts';
 
 export interface PollerDeps {
   db: Db;
@@ -49,11 +50,15 @@ export function createPoller({ db, dashboardUrl, ownSessionIds, wake }: PollerDe
   async function pollOnce() {
     const me = await viewer();
     const seen = new Map<string, { gh: GhPr; role: 'own' | 'review'; inReviewSearch: boolean }>();
-    for (const gh of await searchPrs('is:pr is:open archived:false author:@me')) seen.set(gh.url, { gh, role: 'own', inReviewSearch: false });
-    for (const gh of await searchPrs('is:pr is:open archived:false review-requested:@me')) {
-      if (gh.author?.login !== me) seen.set(gh.url, { gh, role: 'review', inReviewSearch: true });
+    for (const gh of await searchPrs(setting('ownQuery'))) {
+      if (!isExcluded(gh.repository.nameWithOwner)) seen.set(gh.url, { gh, role: 'own', inReviewSearch: false });
     }
-    const missing = db.all<Pr>(`SELECT * FROM prs WHERE state = 'open' OR blocked IS NOT NULL`).filter((p) => !seen.has(p.url));
+    for (const gh of await searchPrs(setting('reviewQuery'))) {
+      if (gh.author?.login !== me && !isExcluded(gh.repository.nameWithOwner)) seen.set(gh.url, { gh, role: 'review', inReviewSearch: true });
+    }
+    const missing = db
+      .all<Pr>(`SELECT * FROM prs WHERE state = 'open' OR blocked IS NOT NULL`)
+      .filter((p) => !seen.has(p.url) && !isExcluded(p.repo));
     const looked = await prsByUrl(missing.map((p) => p.url));
     for (const p of missing) {
       const gh = looked.get(p.url);
@@ -103,7 +108,7 @@ export function createPoller({ db, dashboardUrl, ownSessionIds, wake }: PollerDe
 
     if (newState !== 'open') {
       if (pr.agent_running) return;
-      if (newState === 'merged' || newState === 'dropped') await cleanup(pr);
+      if ((newState === 'merged' || newState === 'dropped') && setting('autoRemoveMergedWorktrees')) await cleanup(pr);
       if (prev.state !== newState) changed(pr.id);
       return;
     }
@@ -117,7 +122,7 @@ export function createPoller({ db, dashboardUrl, ownSessionIds, wake }: PollerDe
         db.enqueue(pr.id, 'review');
       }
       // GitHub drops a PR from review-requested once I reviewed it; showing up again is a re-request.
-      if (!pr.ignored && pr.review_state === 'submitted' && inReviewSearch && !prev.in_review_search) db.enqueue(pr.id, 'followup_review', { reRequested: true });
+      if (!pr.ignored && setting('autoFollowupOnReRequest') && pr.review_state === 'submitted' && inReviewSearch && !prev.in_review_search) db.enqueue(pr.id, 'followup_review', { reRequested: true });
       if (isChanged && pr.review_state === 'submitted') await checkReviewOutOfDate(pr, me);
     }
     if (isChanged) changed(pr.id);
@@ -136,7 +141,7 @@ export function createPoller({ db, dashboardUrl, ownSessionIds, wake }: PollerDe
     } catch (e) {
       const reason = `Cleanup blocked: ${errorMessage(e)}`;
       if (pr.blocked !== reason) db.update('prs', pr.id, { blocked: reason });
-      if (e instanceof Blocked) notify(`Cleanup blocked: ${pr.repo}#${pr.number}`, errorMessage(e), prUrl(pr), `cleanup:${pr.id}`);
+      if (e instanceof Blocked) notify('blocked', `Cleanup blocked: ${pr.repo}#${pr.number}`, errorMessage(e), prUrl(pr), `cleanup:${pr.id}`);
       else throw e;
     }
     changed(pr.id);
@@ -247,7 +252,7 @@ export function createPoller({ db, dashboardUrl, ownSessionIds, wake }: PollerDe
   function checkBatches() {
     for (const pr of db.all<Pr>(`SELECT * FROM prs WHERE role = 'own' AND state = 'open'`)) {
       const status = batchStatus(db.comments(pr.id), db.questions(pr.id), db.workItems(pr.id));
-      if (readyToClose(pr, status, config.batchQuietMs)) {
+      if (readyToClose(pr, status, setting('batchQuietMinutes') * 60_000)) {
         db.enqueue(pr.id, 'close_batch');
         wake();
       }
@@ -266,7 +271,7 @@ export function createPoller({ db, dashboardUrl, ownSessionIds, wake }: PollerDe
         failures++;
         console.error('poll failed:', e);
         const retryable = e instanceof GithubError && e.retryable;
-        if (!retryable || failures >= 3) notify('pr-manager: GitHub error', errorMessage(e).slice(0, 300), dashboardUrl, 'poll-error');
+        if (!retryable || failures >= 3) notify('error', 'pr-manager: GitHub error', errorMessage(e).slice(0, 300), dashboardUrl, 'poll-error');
       }
     })().finally(() => {
       running = undefined;
@@ -275,7 +280,9 @@ export function createPoller({ db, dashboardUrl, ownSessionIds, wake }: PollerDe
   }
 
   function schedule() {
-    const delay = failures ? Math.min(config.pollIntervalMs * 2 ** failures, config.maxPollBackoffMs) : config.pollIntervalMs;
+    clearTimeout(timer);
+    const interval = setting('pollIntervalMinutes') * 60_000;
+    const delay = failures ? Math.min(interval * 2 ** failures, config.maxPollBackoffMs) : interval;
     timer = setTimeout(async () => {
       await tick();
       schedule();
@@ -286,6 +293,8 @@ export function createPoller({ db, dashboardUrl, ownSessionIds, wake }: PollerDe
     start() {
       void tick().then(schedule);
       setInterval(checkBatches, 30_000).unref();
+      // A changed interval or window takes effect right away, not after the current wait.
+      bus.on('settings', schedule);
     },
     stop() {
       clearTimeout(timer);

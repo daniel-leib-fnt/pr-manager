@@ -1,7 +1,7 @@
 import { createSdkMcpServer, tool } from '@anthropic-ai/claude-agent-sdk';
 import { z } from 'zod';
-import { config } from './config.ts';
 import type { Db } from './db.ts';
+import { setting } from './settings.ts';
 import { type GhPrDetail, commentableLines, jobLog, prDetail, prFiles } from './github.ts';
 import { changed, errorMessage } from './util.ts';
 
@@ -77,7 +77,7 @@ export function createAgentTools(db: Db, prId: number, onBlocked: (reason: strin
             url: c.url,
             conversation: c.body,
             ...(c.state === 'accepted' && c.proposal ? { acceptedProposal: c.proposal } : {}),
-            ...(c.kind === 'ci' ? { failedChecks: await ciLogs(c.note), autoFixAllowed: p.ci_attempts < config.maxCiAttempts } : {}),
+            ...(c.kind === 'ci' ? { failedChecks: await ciLogs(c.note), autoFixAllowed: p.ci_attempts < setting('maxCiAttempts') } : {}),
           })),
         );
         const answered = db.questions(prId).filter((q) => q.state === 'answered').map((q) => ({ question: q.question, answer: q.answer, commentId: q.comment_id }));
@@ -113,7 +113,7 @@ export function createAgentTools(db: Db, prId: number, onBlocked: (reason: strin
         const c = ownComment(commentId);
         if (!c) return fail(`Unknown comment ${commentId}.`);
         if (c.state !== 'new' && c.state !== 'accepted') return fail(`Comment ${commentId} is ${c.state}, not new or accepted.`);
-        if (c.kind === 'ci' && c.state === 'new' && pr().ci_attempts >= config.maxCiAttempts) {
+        if (c.kind === 'ci' && c.state === 'new' && pr().ci_attempts >= setting('maxCiAttempts')) {
           return fail('Automatic CI fixes are exhausted for this PR. Undo your change and use propose instead.');
         }
         db.update('comments', commentId, { state: 'fixed', auto: c.state === 'new' ? 1 : 0, reply_draft: c.reply_edited ? c.reply_draft : replyDraft });

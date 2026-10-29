@@ -1,5 +1,6 @@
 import { execFile, spawn } from 'node:child_process';
 import { EventEmitter } from 'node:events';
+import { type NotifyEvent, setting } from './settings.ts';
 
 /** Live updates for the dashboard: `pr` (a PR changed) and `message` (an agent message). */
 export const bus = new EventEmitter();
@@ -32,10 +33,11 @@ export function run(cmd: string, args: string[], opts: { cwd?: string; env?: Nod
 const notified = new Map<string, string>();
 
 /**
- * Desktop notification with an "Open" action. `key` deduplicates: the same key with the
- * same text is shown only once until `clearNotification(key)` is called.
+ * Desktop notification with an "Open" action, sent only if `event` is enabled in the settings.
+ * `key` deduplicates: the same key with the same text is shown only once until cleared.
  */
-export function notify(title: string, body: string, url: string, key?: string) {
+export function notify(event: NotifyEvent, title: string, body: string, url: string, key?: string) {
+  if (!setting('notify').includes(event)) return;
   if (key) {
     if (notified.get(key) === body) return;
     notified.set(key, body);
