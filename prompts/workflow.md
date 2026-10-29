@@ -40,6 +40,8 @@ Items with state `accepted` are proposals I approved or instructions I typed. Im
 
 **Failed CI items** carry the failing logs. Treat them like a comment. When `autoFixAllowed` is false, automatic fixes are exhausted: use `propose` instead.
 
+**Toolchain:** if the repository has a `flake.nix` dev shell and a tool such as `pnpm` is missing, run it through `nix develop -c <command>`.
+
 **Commits:** the branch keeps a clean history. Amend your changes into the last commit with `git commit --amend --no-edit` and leave the worktree clean. Run the project's formatter and the checks the repository instructions name for the files you touched.
 
 **Reply drafts:** short and factual, in the reviewer's language. Say what changed, or why not. Use an empty reply for CI items and instructions.

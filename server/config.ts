@@ -13,6 +13,7 @@ const defaultAllowedTools = [
   'Bash(git *)',
   'Bash(./gradlew *)',
   'Bash(pnpm *)',
+  'Bash(nix develop *)',
 ];
 
 export const config = {

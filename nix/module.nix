@@ -35,7 +35,7 @@ in
 
     allowedTools = lib.mkOption {
       type = lib.types.listOf lib.types.str;
-      default = [ "Read" "Glob" "Grep" "TodoWrite" "Bash(git *)" "Bash(./gradlew *)" "Bash(pnpm *)" ];
+      default = [ "Read" "Glob" "Grep" "TodoWrite" "Bash(git *)" "Bash(./gradlew *)" "Bash(pnpm *)" "Bash(nix develop *)" ];
       description = ''
         Tools agent sessions may use without asking, in Claude Code permission rule syntax.
         Edits inside the worktree are always allowed. Everything else is denied and logged.
