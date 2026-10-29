@@ -81,7 +81,13 @@ export class Overview {
   protected readonly polling = signal(false);
   protected readonly collapsed = signal(loadCollapsed());
   protected readonly groups = computed(() =>
-    GROUPS.map((g) => ({ ...g, prs: this.prs().filter((p) => p.group === g.key) })).filter((g) => g.prs.length),
+    GROUPS.map((g) => ({
+      ...g,
+      // Most recently updated on GitHub first; ISO timestamps sort as strings.
+      prs: this.prs()
+        .filter((p) => p.group === g.key)
+        .sort((a, b) => b.gh_updated_at.localeCompare(a.gh_updated_at)),
+    })).filter((g) => g.prs.length),
   );
 
   constructor() {

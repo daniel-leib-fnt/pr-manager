@@ -29,6 +29,8 @@ export interface Pr {
   reviewed_sha: string | null;
   review_out_of_date: number;
   ignored: number;
+  /** GitHub's last update of the PR, ISO 8601. */
+  gh_updated_at: string;
   group: Group;
   running: boolean;
   batch: 'none' | 'open' | 'closable';
