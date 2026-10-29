@@ -31,7 +31,7 @@ buildNpmPackage {
     fileset = lib.fileset.unions [ ../package.json ../package-lock.json ../server ../prompts ];
   };
   nodejs = nodejs_22;
-  npmDepsHash = "sha256-0L7whIGRd5nX/i30AZWLCSRBwuQ3mKcWQdnt7OrUBzk=";
+  npmDepsHash = "sha256-Oum/k7LM5abrHC/K5sruzNWOl9nz5yivvaO7CDV4DJg=";
   npmInstallFlags = [ "--omit=dev" ];
   dontNpmBuild = true;
   nativeBuildInputs = [ makeWrapper ];
