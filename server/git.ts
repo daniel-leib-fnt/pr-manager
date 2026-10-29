@@ -120,18 +120,37 @@ const isAncestor = (cwd: string, a: string, b: string) => gitOk(cwd, ['merge-bas
 
 /**
  * Brings the worktree to the PR head before a session runs. With an open batch the local
- * branch may hold amended commits; then only the remote must still be where the batch started.
+ * branch may hold amended commits that the batch will push.
+ *
+ * If the branch was pushed to while the batch was open, the batch continues from the new head as
+ * long as no agent work would be lost, and the new head is returned for the caller to record. The
+ * PR is blocked only when the worktree holds agent changes that are not on top of the new head.
  */
-export async function sync(pr: Pr, path: string) {
+export async function sync(pr: Pr, path: string): Promise<string | undefined> {
   await fetchHead(path, pr);
   const head = await git(path, ['rev-parse', 'HEAD']);
   const remote = await git(path, ['rev-parse', remoteHeadRef(pr)]);
   if (pr.role === 'own' && pr.batch_head_sha) {
-    if (remote !== pr.batch_head_sha) {
-      throw new Blocked(`The branch was pushed to (${remote.slice(0, 8)}) while a batch started at ${pr.batch_head_sha.slice(0, 8)} was open.`);
+    const start = pr.batch_head_sha;
+    if (remote === start) {
+      if (head !== remote && (await isAncestor(path, head, remote))) await git(path, ['merge', '--ff-only', remoteHeadRef(pr)]);
+      return undefined;
     }
-    if (head !== remote && (await isAncestor(path, head, remote))) await git(path, ['merge', '--ff-only', remoteHeadRef(pr)]);
-    return;
+    const branch = pr.is_cross_repo ? remoteHeadRef(pr) : `origin/${pr.head_ref}`;
+    const moved = `The branch was pushed to (${remote.slice(0, 8)}) while the batch from ${start.slice(0, 8)} was open`;
+    if (await isDirty(path)) {
+      throw new Blocked(`${moved}, and ${path} holds uncommitted agent changes. Commit them on top of ${branch} or discard them there, then press Retry.`);
+    }
+    // No agent commits beyond the batch start, or only some that the new head already contains: take the new head.
+    if (head === start || (await isAncestor(path, head, remote))) {
+      await git(path, ['reset', '--hard', remoteHeadRef(pr)]);
+      return remote;
+    }
+    // Agent commits already rebased onto the new head stay and are pushed with the batch.
+    if (await isAncestor(path, remote, head)) return remote;
+    throw new Blocked(
+      `${moved}, and the worktree holds agent commits that are not on top of it (HEAD ${head.slice(0, 8)}). To keep them, rebase them onto ${branch} in ${path}; to drop them, run "git reset --hard ${branch}" there. Then press Retry.`,
+    );
   }
   if (head === remote) return;
   if (await isAncestor(path, head, remote)) {

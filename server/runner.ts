@@ -3,7 +3,7 @@ import { existsSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { type Options, type SDKResultMessage, query } from '@anthropic-ai/claude-agent-sdk';
 import { AGENT_TOOL_SERVER, createAgentTools } from './agent-tools.ts';
-import { closeBatch } from './actions.ts';
+import { adoptBatchHead, closeBatch } from './actions.ts';
 import { runnable } from './batch.ts';
 import { config } from './config.ts';
 import { type Db, type Pr, type WorkItem, type WorkKind, now } from './db.ts';
@@ -95,7 +95,8 @@ export function createRunner({ db, poller, dashboardUrl }: RunnerDeps) {
     const sessions = interactiveSessionsIn(path, ownSessionIds());
     if (sessions.length) throw new Blocked(`An interactive Claude session (${sessions[0].name ?? sessions[0].sessionId}) works in ${path}. Pause the PR or close the session, then retry.`);
     if ((await isDirty(path)) && !pr.dirty_by_agent) throw new Blocked(`${path} has uncommitted changes I did not make.`);
-    await sync(db.pr(pr.id)!, path);
+    const moved = await sync(db.pr(pr.id)!, path);
+    if (moved) await adoptBatchHead(db, db.pr(pr.id)!, moved, path);
     await fetchBase(path, pr);
     return path;
   }

@@ -55,6 +55,25 @@ async function resolveThread(threadId: string) {
   await graphql(`mutation($id: ID!) { resolveReviewThread(input: { threadId: $id }) { thread { id } } }`, { id: threadId });
 }
 
+/**
+ * Continues an open batch from a head that was pushed meanwhile. Items marked fixed whose change is
+ * no longer in the worktree go back to the agent, which checks whether the new head covers them.
+ * Returns whether items were reopened.
+ */
+export async function adoptBatchHead(db: Db, pr: Pr, sha: string, path: string): Promise<boolean> {
+  db.update('prs', pr.id, { batch_head_sha: sha, head_sha: sha });
+  let reopened = false;
+  if (!(await localChanged(db.pr(pr.id)!, path))) {
+    for (const c of db.comments(pr.id).filter((x) => x.state === 'fixed')) {
+      db.update('comments', c.id, { state: c.auto ? 'new' : 'accepted', note: 'The branch was pushed to meanwhile; checked again.' });
+      reopened = true;
+    }
+  }
+  if (reopened) db.enqueue(pr.id, 'comments');
+  changed(pr.id);
+  return reopened;
+}
+
 const gone = (e: unknown) => e instanceof GithubError && (e.status === 404 || e.status === 422 || /NOT_FOUND|Could not resolve/i.test(e.message));
 
 /**
@@ -70,7 +89,9 @@ export async function closeBatch(ctx: { db: Db; poller: Poller; pr: Pr; enqueue:
   if (!path) throw new Error('No worktree for this PR.');
   try {
     if (await isDirty(path)) throw new Blocked(`${path} has uncommitted changes at batch close.`);
-    await sync(pr, path);
+    const moved = await sync(pr, path);
+    if (moved && (await adoptBatchHead(db, pr, moved, path))) return; // reopened items need the agent first
+    pr = db.pr(pr.id)!;
   } catch (e) {
     if (e instanceof Blocked) return ctx.block(e.message);
     throw e;
