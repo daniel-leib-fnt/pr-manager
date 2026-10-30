@@ -33,40 +33,71 @@ function loadCollapsed(): Set<Group> {
   imports: [RouterLink, DatePipe],
   template: `
     <div class="toolbar">
-      <span class="muted">Last poll: {{ lastPoll() ? (lastPoll() | date: 'HH:mm:ss') : 'never' }}</span>
-      <button (click)="poll()" [disabled]="polling()">{{ polling() ? 'Polling…' : 'Poll now' }}</button>
+      <span class="muted"
+        >Last poll: {{ lastPoll() ? (lastPoll() | date: 'HH:mm:ss') : 'never' }}</span
+      >
+      <button (click)="poll()" [disabled]="polling()">
+        {{ polling() ? 'Polling…' : 'Poll now' }}
+      </button>
     </div>
 
     @for (g of groups(); track g.key) {
       <section class="group">
         <h2 class="toggle" (click)="toggle(g.key)">
-          <span class="caret">{{ collapsed().has(g.key) ? '▸' : '▾' }}</span> {{ g.label }} <span class="count">{{ g.prs.length }}</span>
+          <span class="caret">{{ collapsed().has(g.key) ? '▸' : '▾' }}</span> {{ g.label }}
+          <span class="count">{{ g.prs.length }}</span>
         </h2>
         @if (!collapsed().has(g.key)) {
-        <ul class="pr-list">
-          @for (pr of g.prs; track pr.id) {
-            <li>
-              <a [routerLink]="['/pr', pr.id]" class="pr-row">
-                <span class="badge" [class]="pr.role">{{ pr.role === 'own' ? 'mine' : 'review' }}</span>
-                <span class="ref">{{ pr.repo }}#{{ pr.number }}</span>
-                <span class="title">{{ pr.title }}</span>
-                <span class="chips">
-                  @if (pr.is_draft) { <span class="chip">draft</span> }
-                  @if (pr.waitingForBuild) { <span class="chip warn">waiting for build</span> }
-                  @if (pr.paused) { <span class="chip warn">paused</span> }
-                  @if (pr.running) { <span class="chip live">working</span> }
-                  @if (pr.counts.proposals) { <span class="chip need">{{ pr.counts.proposals }} proposal(s)</span> }
-                  @if (pr.counts.questions) { <span class="chip need">{{ pr.counts.questions }} question(s)</span> }
-                  @if (pr.review_state === 'draft') { <span class="chip need">review draft</span> }
-                  @if (pr.counts.pending) { <span class="chip">{{ pr.counts.pending }} to push</span> }
-                  @if (pr.check_state) { <span class="chip" [class]="'ci-' + pr.check_state.toLowerCase()">{{ pr.check_state.toLowerCase() }}</span> }
-                  @if (pr.state !== 'open') { <span class="chip">{{ pr.state }}</span> }
-                </span>
-              </a>
-              @if (pr.blocked) { <div class="blocked-line">{{ pr.blocked }}</div> }
-            </li>
-          }
-        </ul>
+          <ul class="pr-list">
+            @for (pr of g.prs; track pr.id) {
+              <li>
+                <a [routerLink]="['/pr', pr.id]" class="pr-row">
+                  <span class="badge" [class]="pr.role">{{
+                    pr.role === 'own' ? 'mine' : 'review'
+                  }}</span>
+                  <span class="ref">{{ pr.repo }}#{{ pr.number }}</span>
+                  <span class="title">{{ pr.title }}</span>
+                  <span class="chips">
+                    @if (pr.is_draft) {
+                      <span class="chip">draft</span>
+                    }
+                    @if (pr.waitingForBuild) {
+                      <span class="chip warn">waiting for build</span>
+                    }
+                    @if (pr.paused) {
+                      <span class="chip warn">paused</span>
+                    }
+                    @if (pr.running) {
+                      <span class="chip live">working</span>
+                    }
+                    @if (pr.counts.proposals) {
+                      <span class="chip need">{{ pr.counts.proposals }} proposal(s)</span>
+                    }
+                    @if (pr.counts.questions) {
+                      <span class="chip need">{{ pr.counts.questions }} question(s)</span>
+                    }
+                    @if (pr.review_state === 'draft') {
+                      <span class="chip need">review draft</span>
+                    }
+                    @if (pr.counts.pending) {
+                      <span class="chip">{{ pr.counts.pending }} to push</span>
+                    }
+                    @if (pr.check_state) {
+                      <span class="chip" [class]="'ci-' + pr.check_state.toLowerCase()">{{
+                        pr.check_state.toLowerCase()
+                      }}</span>
+                    }
+                    @if (pr.state !== 'open') {
+                      <span class="chip">{{ pr.state }}</span>
+                    }
+                  </span>
+                </a>
+                @if (pr.blocked) {
+                  <div class="blocked-line">{{ pr.blocked }}</div>
+                }
+              </li>
+            }
+          </ul>
         }
       </section>
     }

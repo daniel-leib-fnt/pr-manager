@@ -12,7 +12,11 @@ function toDraft(s: Setting): unknown {
 }
 
 function fromDraft(s: Setting, draft: unknown): unknown {
-  if (s.type === 'list') return String(draft).split('\n').map((l) => l.trim()).filter(Boolean);
+  if (s.type === 'list')
+    return String(draft)
+      .split('\n')
+      .map((l) => l.trim())
+      .filter(Boolean);
   if (s.type === 'number') return Number(draft);
   return draft;
 }
@@ -22,8 +26,13 @@ function fromDraft(s: Setting, draft: unknown): unknown {
   imports: [FormsModule],
   template: `
     <h1>Settings</h1>
-    <p class="muted">Changes apply on the next poll or agent run. Reset returns to the Home Manager value or the built-in default.</p>
-    @if (error()) { <div class="banner error">{{ error() }}</div> }
+    <p class="muted">
+      Changes apply on the next poll or agent run. Reset returns to the Home Manager value or the
+      built-in default.
+    </p>
+    @if (error()) {
+      <div class="banner error">{{ error() }}</div>
+    }
 
     @for (g of groups(); track g.name) {
       <section class="card">
@@ -34,48 +43,79 @@ function fromDraft(s: Setting, draft: unknown): unknown {
               <strong>{{ s.label }}</strong>
               <span class="chip" [class.need]="s.source === 'override'">{{ sourceLabel(s) }}</span>
             </div>
-            @if (s.help) { <p class="muted small">{{ s.help }}</p> }
+            @if (s.help) {
+              <p class="muted small">{{ s.help }}</p>
+            }
             @switch (s.type) {
               @case ('boolean') {
-                <label class="inline"><input type="checkbox" [(ngModel)]="drafts[s.key]" /> enabled</label>
+                <label class="inline"
+                  ><input type="checkbox" [(ngModel)]="drafts[s.key]" /> enabled</label
+                >
               }
-              @case ('number') { <input type="number" class="narrow" [(ngModel)]="drafts[s.key]" /> }
-              @case ('string') { <input [(ngModel)]="drafts[s.key]" /> }
+              @case ('number') {
+                <input type="number" class="narrow" [(ngModel)]="drafts[s.key]" />
+              }
+              @case ('string') {
+                <input [(ngModel)]="drafts[s.key]" />
+              }
               @case ('enum') {
                 <select [(ngModel)]="drafts[s.key]">
-                  @for (o of s.options; track o.value) { <option [value]="o.value">{{ o.label }}</option> }
+                  @for (o of s.options; track o.value) {
+                    <option [value]="o.value">{{ o.label }}</option>
+                  }
                 </select>
               }
               @case ('days') {
                 <div class="choice">
                   @for (d of days; track $index) {
-                    <label class="inline"><input type="checkbox" [checked]="has(s.key, $index)" (change)="flip(s.key, $index)" /> {{ d }}</label>
+                    <label class="inline"
+                      ><input
+                        type="checkbox"
+                        [checked]="has(s.key, $index)"
+                        (change)="flip(s.key, $index)"
+                      />
+                      {{ d }}</label
+                    >
                   }
                 </div>
               }
               @case ('multi') {
                 <div class="choice">
                   @for (o of s.options; track o.value) {
-                    <label class="inline"><input type="checkbox" [checked]="has(s.key, o.value)" (change)="flip(s.key, o.value)" /> {{ o.label }}</label>
+                    <label class="inline"
+                      ><input
+                        type="checkbox"
+                        [checked]="has(s.key, o.value)"
+                        (change)="flip(s.key, o.value)"
+                      />
+                      {{ o.label }}</label
+                    >
                   }
                 </div>
               }
-              @default { <textarea [rows]="s.type === 'text' ? 8 : 5" [(ngModel)]="drafts[s.key]"></textarea> }
+              @default {
+                <textarea [rows]="s.type === 'text' ? 8 : 5" [(ngModel)]="drafts[s.key]"></textarea>
+              }
             }
             <div class="setting-actions">
               <button (click)="save(s)" [disabled]="!dirty(s) || busy()">Save</button>
-              @if (s.source === 'override') { <button class="subtle" (click)="reset(s)" [disabled]="busy()">Reset</button> }
+              @if (s.source === 'override') {
+                <button class="subtle" (click)="reset(s)" [disabled]="busy()">Reset</button>
+              }
             </div>
           </div>
         }
         @if (g.name === 'Agent' && denied().length) {
           <div class="setting">
             <strong>Recently denied tool calls</strong>
-            <p class="muted small">Allow adds the proposed rule to the allowed tools; edit it first if it is too broad.</p>
+            <p class="muted small">
+              Allow adds the proposed rule to the allowed tools; edit it first if it is too broad.
+            </p>
             <ul class="items">
               @for (d of denied(); track $index) {
                 <li>
-                  <code>{{ d.tool }}</code> {{ d.pr }} <span class="muted">{{ d.detail.slice(0, 160) }}</span>
+                  <code>{{ d.tool }}</code> {{ d.pr }}
+                  <span class="muted">{{ d.detail.slice(0, 160) }}</span>
                   <div class="choice">
                     <input class="grow" [(ngModel)]="d.rule" />
                     <button (click)="allow(d)" [disabled]="busy()">Allow</button>
@@ -90,10 +130,16 @@ function fromDraft(s: Setting, draft: unknown): unknown {
 
     <section class="card">
       <h2>Home Manager only</h2>
-      <p class="muted small">These need a rebuild because the daemon needs them before it starts or because changing them moves files.</p>
+      <p class="muted small">
+        These need a rebuild because the daemon needs them before it starts or because changing them
+        moves files.
+      </p>
       <ul class="items">
         @for (n of nixOnly(); track n.option) {
-          <li><strong>{{ n.label }}:</strong> <code>{{ n.value }}</code> <span class="muted">({{ n.option }})</span></li>
+          <li>
+            <strong>{{ n.label }}:</strong> <code>{{ n.value }}</code>
+            <span class="muted">({{ n.option }})</span>
+          </li>
         }
       </ul>
     </section>
@@ -173,7 +219,8 @@ export class SettingsPage {
   }
 
   protected allow(d: DeniedCall) {
-    const current = (this.settings().find((s) => s.key === 'allowedTools')?.value as string[]) ?? [];
+    const current =
+      (this.settings().find((s) => s.key === 'allowedTools')?.value as string[]) ?? [];
     if (current.includes(d.rule)) return;
     void this.run(async () => {
       const res = await this.api.saveSettings({ allowedTools: [...current, d.rule.trim()] });
