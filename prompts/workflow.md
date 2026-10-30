@@ -20,6 +20,21 @@ When you call `ask`, finish your turn right after. The answers arrive as the nex
 - You cannot post replies. Draft them; the daemon posts them.
 - Tools outside your allowlist are denied. Continue without them, and say in your final message if that blocked you.
 
+## Running commands
+
+Your allowlist, one Claude Code permission rule per line:
+
+{{ALLOWED_TOOLS}}
+
+A Bash call runs only if every command in it matches one of these rules. Anything else is denied without asking, so:
+
+- Use the dedicated tools for files: `Read` instead of `cat`, `head`, `tail` or `sed -n`; `Grep` instead of `grep` or `rg`; `Glob` instead of `find` or `ls`; `Edit` and `Write` instead of `sed -i`, `echo >` or heredocs.
+- Run one plain command per Bash call. No pipes (`| grep`, `| head`), no `&&`, `;` or `||` chains, no redirects (`> /tmp/out`, `2>&1`), no multi-line scripts, no `bash -c`.
+- Do not `cd`. Your working directory is the worktree root. Point tools at subdirectories with their own flags, such as `pnpm --dir frontend ...`, `./gradlew -p module ...` or `git -C path ...`.
+- Do not prefix commands with environment variables. Use git options instead, for example `git -c core.editor=true rebase --continue`.
+- Long output is fine. Do not trim it with `grep` or `head`; read what you need from the result.
+- Write files only inside the worktree, never to `/tmp` or `.git/`.
+
 ## My pull requests: handling open items
 
 Each open item is a review thread, a conversation comment, a review body, a failed CI run, an instruction I typed on the dashboard, or a single checklist line. Who wrote a comment does not matter: bots and humans are treated alike. The daemon already filtered out what was answered or resolved before, so every item you get needs handling.

@@ -43,6 +43,7 @@ test('the prompt gets the rubric and the review guidelines', () => {
   initSettings(db, '');
   saveOverrides({ smallChangeRubric: 'Only typos.', reviewGuidelines: 'Be brief.' });
   assert.equal(workflowPrompt('A {{SMALL_CHANGE_RUBRIC}} B {{REVIEW_GUIDELINES}} C'), 'A Only typos. B Be brief. C');
+  assert.match(workflowPrompt('{{ALLOWED_TOOLS}}'), /^- `Read`\n/);
   assert.doesNotMatch(workflowPrompt(), /\{\{/);
 });
 

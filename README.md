@@ -21,8 +21,10 @@ A local daemon with a dashboard for my GitHub pull requests: the ones I authored
 - **Poller:** every 2 minutes, Monday to Friday, 07:00 to 18:00, it runs two GitHub searches: `author:@me` and `review-requested:@me`, the latter including team requests. Known PRs are also looked up by URL. Only changed PRs get a detail fetch, and only new activity starts an agent.
 - **Runner:** one session at a time by default, so builds and tests never collide; never two on the same PR.
   - Each PR's session is resumed by its stored id, with the worktree as working directory.
-  - Before a run, the daemon fetches and checks the worktree. A PR is blocked when the worktree has changes it did not make, when an interactive Claude session works in it, or when someone pushed during an open batch.
-- **No network for agents:** sessions get no GitHub token, no SSH agent, no credential helper and an empty gh config. Pushing, posting and resolving are daemon actions that run only when a batch closes. Tools outside the allowlist are denied and shown in the transcript.
+  - Before a run, the daemon fetches and checks the worktree. A PR is blocked when the worktree has changes it did not make, when an interactive Claude session works in it, or when someone pushed during an open batch that would lose agent work.
+  - A run interrupted by a restart is queued again, and the session is told to check its unfinished changes.
+- **No network for agents:** sessions get no GitHub token, no SSH agent, no credential helper and an empty gh config. Pushing, posting and resolving are daemon actions that run only when a batch closes.
+- **Tool allowlist:** the allowlist is part of the agent prompt, together with the rule that every command of a Bash call must match it, so no pipes, chains or `cd`. Denied calls appear in the transcript and on the settings page, each with a suggested allow rule.
 - **Cleanup:** merged PRs, withdrawn review requests and closed reviews have their worktree and agent session removed automatically, unless the worktree holds uncommitted or unpushed work or an interactive session. My own closed PRs keep their worktree until I remove it on the dashboard.
 
 Worktrees live at `~/SC/github/<org>/<repo>.worktrees/<branch-with-dash>`. Clones are created at `~/SC/github/<org>/<repo>` when missing.

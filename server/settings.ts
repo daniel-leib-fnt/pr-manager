@@ -246,9 +246,12 @@ export function inPollWindow(now = new Date()): boolean {
   return setting('pollDays').includes(now.getDay()) && h >= setting('pollFromHour') && h < setting('pollToHour');
 }
 
-/** The workflow prompt with the configurable rubric and review guidelines filled in. */
+/** The workflow prompt with the configurable rubric, review guidelines and tool allowlist filled in. */
 export function workflowPrompt(template = readFileSync(config.promptFile, 'utf8')): string {
-  return template.replace('{{SMALL_CHANGE_RUBRIC}}', setting('smallChangeRubric')).replace('{{REVIEW_GUIDELINES}}', setting('reviewGuidelines'));
+  return template
+    .replace('{{SMALL_CHANGE_RUBRIC}}', setting('smallChangeRubric'))
+    .replace('{{REVIEW_GUIDELINES}}', setting('reviewGuidelines'))
+    .replace('{{ALLOWED_TOOLS}}', setting('allowedTools').map((t) => `- \`${t}\``).join('\n'));
 }
 
 export const isExcluded = (repo: string) => setting('excludedRepos').some((r) => r.toLowerCase() === repo.toLowerCase());
