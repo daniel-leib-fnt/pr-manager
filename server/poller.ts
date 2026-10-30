@@ -115,8 +115,10 @@ export function createPoller({ db, dashboardUrl }: PollerDeps) {
     if (role === 'own') {
       if (fields.check_state === 'SUCCESS' && pr.ci_attempts) db.update('prs', pr.id, { ci_attempts: 0 });
       const lostReady = !!prev.ready && !pr.ready;
+      // The rollup can turn FAILURE while other checks still run; ingest then skips CI, and nothing else changes once they finish.
+      const ciUnseen = (pr.check_state === 'FAILURE' || pr.check_state === 'ERROR') && !db.comments(pr.id).some((c) => c.gh_key === `ci:${gh.headRefOid}`);
       // Losing the ready state means something changed on GitHub: look at the PR again, even if its update time did not move.
-      if (isChanged || lostReady) await ingest(pr, me);
+      if (isChanged || lostReady || ciUnseen) await ingest(pr, me);
       // A moving base does not change the PR's update time, so conflicts are checked on every poll.
       if (gh.mergeStateStatus === 'DIRTY') addConflict(db, pr, gh.headRefOid, gh.baseRefOid);
       if (prev.ready !== pr.ready) changed(pr.id);
