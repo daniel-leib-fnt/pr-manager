@@ -14,6 +14,7 @@ A local daemon with a dashboard for my GitHub pull requests: the ones I authored
   - New commits mark the review as out of date.
   - An ignored review moves to the "Ignored" section and loses its worktree and agent session; when I stop ignoring it, both start afresh.
   - A follow-up review runs on demand, or automatically when my review is re-requested.
+- **Instructions:** on any PR page I can type a free-text instruction. It becomes an accepted item for the agent, and on my PRs it joins the open batch.
 - **Notifications:** a desktop notification appears when I am needed: a proposal or question waits, a review draft is ready, a PR is blocked, or something failed.
 
 ## How it works
@@ -101,3 +102,5 @@ npm start                   # daemon on :8020, serves web/dist
 The Agent SDK version must match the `claude-code` version of the pinned nixpkgs: SDK `0.3.N` belongs to `claude-code` `2.1.N`. After `npm install`, run `npm run lock:strip`. It removes the SDK's bundled native binaries from the lockfile, because the daemon uses the Nix `claude-code` and fetchNpmDeps would otherwise download them for every platform. Then update the `npmDepsHash` values in `nix/package.nix`.
 
 The server is TypeScript run directly by Node through type stripping, so there is no build step. Only erasable syntax is allowed.
+
+Architecture, file map and conventions for coding agents are in [AGENTS.md](AGENTS.md).
