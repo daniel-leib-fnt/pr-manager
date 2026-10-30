@@ -25,10 +25,6 @@ let
   '';
 in
 {
-  imports = [
-    (lib.mkRenamedOptionModule [ "services" "pr-manager" "allowedTools" ] [ "services" "pr-manager" "settings" "allowedTools" ])
-  ];
-
   options.services.pr-manager = {
     enable = lib.mkEnableOption "pr-manager, the dashboard and agent runner for GitHub pull requests";
 

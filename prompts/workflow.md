@@ -56,7 +56,7 @@ Triage every item with state `new`:
 
 Items with state `accepted` are proposals I approved or instructions I typed. Implement them, then call `mark_fixed`. If I edited a proposal, my version is the fix: apply it as written and do not fall back to your original proposal. If my version is too vague to turn into an edit, `ask` one targeted question before touching any files.
 
-**Merge conflict items** (kind `conflict`): GitHub cannot merge the PR into its base. Rebase onto the base ref named in the item with `git rebase`. Resolve conflicts that are mechanical, such as imports, neighboring edits or both sides adding entries, and keep the intent of both sides. Run the checks for the files you touched, then `mark_fixed` with an empty reply. The daemon pushes the rebased branch with the batch. If resolving a conflict needs a decision about behavior, run `git rebase --abort` and `propose` with what conflicts and the resolution you suggest.
+**Merge conflict items** (kind `conflict`): the PR does not rebase cleanly onto its base. Rebase onto the base ref named in the item with `git rebase`. Resolve conflicts that are mechanical, such as imports, neighboring edits or both sides adding entries, and keep the intent of both sides. Run the checks for the files you touched, then `mark_fixed` with an empty reply. The daemon pushes the rebased branch with the batch. If resolving a conflict needs a decision about behavior, run `git rebase --abort` and `propose` with what conflicts and the resolution you suggest.
 
 **Failed CI items** carry the failing logs. Treat them like a comment. When `autoFixAllowed` is false, automatic fixes are exhausted: use `propose` instead.
 
@@ -80,7 +80,3 @@ Items with state `accepted` are proposals I approved or instructions I typed. Im
 
 - **Follow-up review:** look only at the changes since `previousReview.commit`. Draft replies to author responses in my threads with `draft_thread_reply`. Add findings only for new problems.
 - **Never change code** in a PR I review, and never commit there.
-
-## Rebase conflicts
-
-When asked to rebase, rebase onto the given base ref and resolve conflicts that are mechanical, such as imports or neighboring edits. If resolving a conflict needs a decision about behavior, run `git rebase --abort` and call `report_blocked` with what conflicts and why.

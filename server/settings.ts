@@ -21,7 +21,7 @@ const DEFAULT_REVIEW_GUIDELINES = `- Read the PR description and the full diff. 
 - Skip style nitpicks that a formatter or linter would catch.
 - Use APPROVE when nothing blocks, REQUEST_CHANGES for real defects, and COMMENT otherwise.`;
 
-export const NOTIFY_EVENTS = ['input', 'review_draft', 'blocked', 'error'] as const;
+const NOTIFY_EVENTS = ['input', 'review_draft', 'blocked', 'error'] as const;
 export type NotifyEvent = (typeof NOTIFY_EVENTS)[number];
 
 type FieldType = 'number' | 'boolean' | 'string' | 'text' | 'list' | 'enum' | 'multi' | 'days';
@@ -149,7 +149,7 @@ export const DEFS = {
 };
 
 export type SettingKey = keyof typeof DEFS;
-export type SettingValue<K extends SettingKey> = (typeof DEFS)[K]['default'];
+type SettingValue<K extends SettingKey> = (typeof DEFS)[K]['default'];
 
 const isKey = (k: string): k is SettingKey => Object.hasOwn(DEFS, k);
 
@@ -258,7 +258,7 @@ export const isExcluded = (repo: string) => setting('excludedRepos').some((r) =>
 
 // --- Denied tool calls, kept for the settings page ---------------------------------------
 
-export interface DeniedCall {
+interface DeniedCall {
   at: string;
   pr: string;
   tool: string;

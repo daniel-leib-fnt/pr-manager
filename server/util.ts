@@ -10,20 +10,10 @@ export function changed(prId: number) {
   bus.emit('event', { type: 'pr', prId });
 }
 
-export class CommandError extends Error {
-  readonly stderr: string;
-  readonly code: number | null;
-  constructor(cmd: string, code: number | null, stderr: string) {
-    super(`${cmd} failed (${code}): ${stderr.trim().split('\n').slice(-5).join('\n')}`);
-    this.stderr = stderr;
-    this.code = code;
-  }
-}
-
 export function run(cmd: string, args: string[], opts: { cwd?: string; env?: NodeJS.ProcessEnv; input?: string } = {}): Promise<string> {
   return new Promise((resolve, reject) => {
     const child = execFile(cmd, args, { cwd: opts.cwd, env: opts.env ?? process.env, maxBuffer: 64 * 1024 * 1024 }, (err, stdout, stderr) => {
-      if (err) reject(new CommandError(`${cmd} ${args.join(' ')}`, typeof err.code === 'number' ? err.code : null, stderr || err.message));
+      if (err) reject(new Error(`${cmd} ${args.join(' ')} failed (${err.code}): ${(stderr || err.message).trim().split('\n').slice(-5).join('\n')}`));
       else resolve(stdout);
     });
     if (opts.input !== undefined) child.stdin?.end(opts.input);

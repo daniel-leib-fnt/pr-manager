@@ -11,11 +11,11 @@ const REVIEW_KINDS = new Set<WorkKind>(['review', 'followup_review']);
 export const runnable = (pr: Pick<Pr, 'check_state'>, kind: WorkKind) => !REVIEW_KINDS.has(kind) || buildGreen(pr);
 
 /** Comments that still need the agent or me before the batch can be pushed. */
-export const OPEN_STATES = new Set(['new', 'proposal', 'accepted']);
+const OPEN_STATES = new Set(['new', 'proposal', 'accepted']);
 /** Comments whose result (push, reply, resolve) still has to reach GitHub. */
-export const PENDING_STATES = new Set(['fixed', 'skipped']);
+const PENDING_STATES = new Set(['fixed', 'skipped']);
 
-export type BatchStatus = 'none' | 'open' | 'closable';
+type BatchStatus = 'none' | 'open' | 'closable';
 
 export function batchStatus(comments: Comment[], questions: Question[], work: WorkItem[]): BatchStatus {
   const open =

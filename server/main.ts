@@ -9,13 +9,8 @@ const dashboardUrl = `http://127.0.0.1:${config.port}`;
 const db = openDb();
 initSettings(db);
 
-// The poller and the runner need each other; the runner is created right below.
-let wake = () => {};
-let ownSessionIds = () => new Set<string>();
-const poller = createPoller({ db, dashboardUrl, ownSessionIds: () => ownSessionIds(), wake: () => wake() });
+const poller = createPoller({ db, dashboardUrl });
 const runner = createRunner({ db, poller, dashboardUrl });
-wake = runner.wake;
-ownSessionIds = runner.ownSessionIds;
 
 runner.recover();
 const server = createHttp({ db, poller, runner });

@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { hasProse } from './checklist.ts';
 import type { Db } from './db.ts';
 import { setting } from './settings.ts';
-import { type GhPrDetail, commentableLines, jobLog, prDetail, prFiles } from './github.ts';
+import { type GhPrDetail, commentableLines, prDetail, prFiles, rest } from './github.ts';
 import { changed, errorMessage } from './util.ts';
 
 const ok = (text: string) => ({ content: [{ type: 'text' as const, text }] });
@@ -42,7 +42,9 @@ export function createAgentTools(db: Db, prId: number, onBlocked: (reason: strin
       checks.map(async (c) => {
         if (!c.id) return { name: c.name, url: c.url, log: '(no log available, see the URL)' };
         try {
-          return { name: c.name, url: c.url, log: tail(await jobLog(pr().repo, c.id), 200) };
+          // GitHub answers with a redirect to the plain-text log, which fetch follows.
+          const log = await rest<string>('GET', `/repos/${pr().repo}/actions/jobs/${c.id}/logs`);
+          return { name: c.name, url: c.url, log: tail(log, 200) };
         } catch (e) {
           return { name: c.name, url: c.url, log: `(log unavailable: ${errorMessage(e)})` };
         }

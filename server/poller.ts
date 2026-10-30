@@ -1,7 +1,7 @@
 import { deleteSession } from '@anthropic-ai/claude-agent-sdk';
+import { addConflict, openBatch } from './actions.ts';
 import { batchStatus, buildGreen, readyToClose } from './batch.ts';
 import { type TaskSource, hasTasks, parseTasks, taskKeys } from './checklist.ts';
-import { config } from './config.ts';
 import { type Comment, type Db, type Pr, type PrState, now } from './db.ts';
 import { Blocked, removeWorktree } from './git.ts';
 import {
@@ -15,7 +15,7 @@ import {
   readyToMerge,
   rollupState,
   searchPrs,
-  viewerLogin,
+  viewer,
 } from './github.ts';
 import { inPollWindow, isExcluded, setting } from './settings.ts';
 import { bus, changed, clearNotification, errorMessage, notify } from './util.ts';
@@ -23,27 +23,16 @@ import { bus, changed, clearNotification, errorMessage, notify } from './util.ts
 export interface PollerDeps {
   db: Db;
   dashboardUrl: string;
-  ownSessionIds: () => Set<string>;
-  wake: () => void;
 }
 
 export type Poller = ReturnType<typeof createPoller>;
 
-export function createPoller({ db, dashboardUrl, ownSessionIds, wake }: PollerDeps) {
+export function createPoller({ db, dashboardUrl }: PollerDeps) {
   let failures = 0;
   let timer: NodeJS.Timeout | undefined;
   let running: Promise<void> | undefined;
 
   const prUrl = (pr: Pr) => `${dashboardUrl}/pr/${pr.id}`;
-
-  async function viewer(): Promise<string> {
-    let login = db.kvGet('viewer');
-    if (!login) {
-      login = await viewerLogin();
-      db.kvSet('viewer', login);
-    }
-    return login;
-  }
 
   function ghState(gh: GhPr): PrState {
     if (gh.merged || gh.state === 'MERGED') return 'merged';
@@ -82,7 +71,7 @@ export function createPoller({ db, dashboardUrl, ownSessionIds, wake }: PollerDe
     }
     db.kvSet('lastPoll', now());
     checkBatches();
-    wake();
+    bus.emit('wake');
   }
 
   async function upsert(gh: GhPr, role: 'own' | 'review', inReviewSearch: boolean, me: string) {
@@ -129,7 +118,7 @@ export function createPoller({ db, dashboardUrl, ownSessionIds, wake }: PollerDe
       // Losing the ready state means something changed on GitHub: look at the PR again, even if its update time did not move.
       if (isChanged || lostReady) await ingest(pr, me);
       // A moving base does not change the PR's update time, so conflicts are checked on every poll.
-      if (gh.mergeStateStatus === 'DIRTY') addConflict(pr, gh);
+      if (gh.mergeStateStatus === 'DIRTY') addConflict(db, pr, gh.headRefOid, gh.baseRefOid);
       if (prev.ready !== pr.ready) changed(pr.id);
     } else {
       const becameReady = prev.is_draft && !gh.isDraft;
@@ -151,7 +140,7 @@ export function createPoller({ db, dashboardUrl, ownSessionIds, wake }: PollerDe
 
   async function cleanup(pr: Pr) {
     try {
-      if (pr.worktree) await removeWorktree(pr, ownSessionIds());
+      if (pr.worktree) await removeWorktree(pr, db.ownSessionIds());
       if (pr.session_id) {
         await deleteSession(pr.session_id, pr.worktree ? { dir: pr.worktree } : undefined).catch((e) => console.error(`delete session of ${pr.url}:`, errorMessage(e)));
       }
@@ -170,7 +159,7 @@ export function createPoller({ db, dashboardUrl, ownSessionIds, wake }: PollerDe
   async function discard(pr: Pr) {
     if (pr.agent_running || (!pr.worktree && !pr.session_id)) return;
     try {
-      await removeWorktree(pr, ownSessionIds());
+      await removeWorktree(pr, db.ownSessionIds());
     } catch (e) {
       if (!(e instanceof Blocked)) throw e;
       notify('blocked', `Cleanup blocked: ${pr.repo}#${pr.number}`, errorMessage(e), prUrl(pr), `cleanup:${pr.id}`);
@@ -299,33 +288,8 @@ export function createPoller({ db, dashboardUrl, ownSessionIds, wake }: PollerDe
     }
 
     db.kvSet(`ingested:${pr.id}`, '1');
-    if (added) {
-      const fresh = db.pr(pr.id)!;
-      db.update('prs', pr.id, { last_event_at: now(), batch_head_sha: fresh.batch_head_sha ?? d.headRefOid });
-      db.enqueue(pr.id, 'comments');
-      changed(pr.id);
-    }
+    if (added) openBatch(db, pr.id, d.headRefOid);
     return added;
-  }
-
-  /** A merge conflict on one of my PRs becomes an item: the agent rebases, the batch pushes. */
-  function addConflict(pr: Pr, gh: GhPr) {
-    const comments = db.comments(pr.id);
-    // One conflict at a time: a base that moves on while the agent works is picked up by the same rebase.
-    if (comments.some((c) => c.kind === 'conflict' && ['new', 'proposal', 'accepted', 'fixed'].includes(c.state))) return;
-    const key = `conflict:${gh.headRefOid}:${gh.baseRefOid}`;
-    if (comments.some((c) => c.gh_key === key)) return;
-    db.insert('comments', {
-      pr_id: pr.id,
-      kind: 'conflict',
-      gh_key: key,
-      author: 'github',
-      body: `GitHub reports merge conflicts with ${pr.base_ref} (head ${gh.headRefOid.slice(0, 8)}, base ${gh.baseRefOid.slice(0, 8)}). Rebase onto refs/remotes/origin/${pr.base_ref}.`,
-    });
-    const fresh = db.pr(pr.id)!;
-    db.update('prs', pr.id, { last_event_at: now(), batch_head_sha: fresh.batch_head_sha ?? gh.headRefOid });
-    db.enqueue(pr.id, 'comments');
-    changed(pr.id);
   }
 
   async function checkReviewOutOfDate(pr: Pr, me: string) {
@@ -346,7 +310,7 @@ export function createPoller({ db, dashboardUrl, ownSessionIds, wake }: PollerDe
       const status = batchStatus(db.comments(pr.id), db.questions(pr.id), db.workItems(pr.id));
       if (readyToClose(pr, status, setting('batchQuietMinutes') * 60_000)) {
         db.enqueue(pr.id, 'close_batch');
-        wake();
+        bus.emit('wake');
       }
     }
   }
@@ -374,7 +338,7 @@ export function createPoller({ db, dashboardUrl, ownSessionIds, wake }: PollerDe
   function schedule() {
     clearTimeout(timer);
     const interval = setting('pollIntervalMinutes') * 60_000;
-    const delay = failures ? Math.min(interval * 2 ** failures, config.maxPollBackoffMs) : interval;
+    const delay = failures ? Math.min(interval * 2 ** failures, 30 * 60_000) : interval;
     timer = setTimeout(async () => {
       await tick();
       schedule();
@@ -395,7 +359,6 @@ export function createPoller({ db, dashboardUrl, ownSessionIds, wake }: PollerDe
     ingest,
     cleanup,
     discard,
-    viewer,
     checkBatches,
   };
 }

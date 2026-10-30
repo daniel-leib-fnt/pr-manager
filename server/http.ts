@@ -12,9 +12,9 @@ import type { Runner } from './runner.ts';
 import { deniedCalls, describeNixOnly, describeSettings, isExcluded, resetOverride, saveOverrides } from './settings.ts';
 import { bus, changed, clearNotification, errorMessage } from './util.ts';
 
-export type Group = 'ready' | 'needs_me' | 'working' | 'queued' | 'blocked' | 'out_of_date' | 'waiting' | 'ignored' | 'closed';
+type Group = 'ready' | 'needs_me' | 'working' | 'queued' | 'blocked' | 'out_of_date' | 'waiting' | 'ignored' | 'closed';
 
-export function groupOf(db: Db, pr: Pr): Group {
+function groupOf(db: Db, pr: Pr): Group {
   if (pr.state !== 'open') return pr.blocked ? 'blocked' : 'closed';
   if (pr.ignored) return 'ignored';
   if (pr.blocked) return 'blocked';

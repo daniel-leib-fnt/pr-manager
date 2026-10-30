@@ -39,9 +39,9 @@ async function gitNetNow(cwd: string, args: string[]) {
 
 const httpsUrl = (repo: string) => `https://github.com/${repo}.git`;
 
-export const clonePath = (repo: string) => join(config.srcRoot, repo);
+const clonePath = (repo: string) => join(config.srcRoot, repo);
 
-export const worktreePath = (repo: string, branch: string) => {
+const worktreePath = (repo: string, branch: string) => {
   const [owner, name] = repo.split('/');
   return config.worktreeDir
     .replaceAll('{clone}', clonePath(repo))
@@ -50,7 +50,7 @@ export const worktreePath = (repo: string, branch: string) => {
     .replaceAll('{branch}', branch.replaceAll('/', '-'));
 };
 
-export function ensureClone(repo: string): Promise<string> {
+function ensureClone(repo: string): Promise<string> {
   return serial(repo, async () => {
     const path = clonePath(repo);
     if (existsSync(join(path, '.git'))) return path;
@@ -61,9 +61,9 @@ export function ensureClone(repo: string): Promise<string> {
 }
 
 /** The ref that holds the PR head after `fetchHead`. Fork heads come from the pull ref. */
-export const remoteHeadRef = (pr: Pr) => (pr.is_cross_repo ? `refs/remotes/origin/pr/${pr.number}` : `refs/remotes/origin/${pr.head_ref}`);
+const remoteHeadRef = (pr: Pr) => (pr.is_cross_repo ? `refs/remotes/origin/pr/${pr.number}` : `refs/remotes/origin/${pr.head_ref}`);
 
-export async function fetchHead(cwd: string, pr: Pr) {
+async function fetchHead(cwd: string, pr: Pr) {
   const src = pr.is_cross_repo ? `refs/pull/${pr.number}/head` : `refs/heads/${pr.head_ref}`;
   await gitNet(pr.repo, cwd, ['fetch', '--no-tags', httpsUrl(pr.repo), `+${src}:${remoteHeadRef(pr)}`]);
 }
@@ -77,7 +77,7 @@ interface WorktreeEntry {
   branch: string | null;
 }
 
-export async function listWorktrees(clone: string): Promise<WorktreeEntry[]> {
+async function listWorktrees(clone: string): Promise<WorktreeEntry[]> {
   const out = await git(clone, ['worktree', 'list', '--porcelain']);
   return out
     .split('\n\n')

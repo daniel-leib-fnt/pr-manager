@@ -65,12 +65,7 @@ export async function rest<T = unknown>(method: string, path: string, body?: unk
   return (type.includes('json') ? await res.json() : await res.text()) as T;
 }
 
-/** Plain-text log of an Actions job; GitHub answers with a redirect that fetch follows. */
-export async function jobLog(repo: string, jobId: number): Promise<string> {
-  return rest<string>('GET', `/repos/${repo}/actions/jobs/${jobId}/logs`);
-}
-
-export const PR_FIELDS = `
+const PR_FIELDS = `
   url number title isDraft state merged updatedAt
   mergeStateStatus reviewDecision latestReviews(first: 20) { nodes { state } }
   headRefName headRefOid baseRefName baseRefOid isCrossRepository
@@ -118,9 +113,12 @@ export function rollupState(pr: GhPr): string | null {
   return pr.commits.nodes[0]?.commit.statusCheckRollup?.state ?? null;
 }
 
-export async function viewerLogin(): Promise<string> {
-  const data = await graphql<{ viewer: { login: string } }>('query { viewer { login } }');
-  return data.viewer.login;
+let login: string | undefined;
+
+/** My GitHub login, fetched once per daemon start. */
+export async function viewer(): Promise<string> {
+  login ??= (await graphql<{ viewer: { login: string } }>('query { viewer { login } }')).viewer.login;
+  return login;
 }
 
 export async function searchPrs(q: string): Promise<GhPr[]> {
@@ -166,7 +164,7 @@ export interface GhComment {
   url: string;
 }
 
-export interface GhThread {
+interface GhThread {
   id: string;
   isResolved: boolean;
   path: string;
@@ -175,7 +173,7 @@ export interface GhThread {
   comments: { nodes: GhComment[] };
 }
 
-export interface GhCheck {
+interface GhCheck {
   __typename: 'CheckRun' | 'StatusContext';
   databaseId?: number;
   name?: string;

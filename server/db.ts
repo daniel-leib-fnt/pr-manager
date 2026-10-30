@@ -3,9 +3,9 @@ import { join } from 'node:path';
 import { DatabaseSync, type SQLInputValue } from 'node:sqlite';
 import { config } from './config.ts';
 
-export type Role = 'own' | 'review';
+type Role = 'own' | 'review';
 export type PrState = 'open' | 'merged' | 'closed' | 'dropped';
-export type ReviewState = 'none' | 'draft' | 'submitted';
+type ReviewState = 'none' | 'draft' | 'submitted';
 
 export interface Pr {
   id: number;
@@ -48,11 +48,11 @@ export interface Pr {
   created_at: string;
 }
 
-export type CommentKind = 'thread' | 'issue_comment' | 'review_body' | 'ci' | 'instruction' | 'conflict';
+type CommentKind = 'thread' | 'issue_comment' | 'review_body' | 'ci' | 'instruction' | 'conflict';
 // new: not triaged yet; fixed: changed locally, waiting for push; proposal: waiting for me;
 // accepted: I accepted, agent has to implement; skipped: I skipped, reply pending;
 // done: finished; gone: deleted on GitHub.
-export type CommentState = 'new' | 'fixed' | 'proposal' | 'accepted' | 'skipped' | 'done' | 'gone';
+type CommentState = 'new' | 'fixed' | 'proposal' | 'accepted' | 'skipped' | 'done' | 'gone';
 
 export interface Comment {
   id: number;
@@ -115,7 +115,6 @@ export type WorkKind =
   | 'answers'
   | 'review'
   | 'followup_review'
-  | 'rebase'
   | 'close_batch';
 
 export interface WorkItem {
@@ -245,19 +244,10 @@ export function openDb(path = join(config.stateDir, 'pr-manager.db')) {
   db.exec('PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;');
   db.exec(schema);
   // Columns added after the first release; CREATE TABLE IF NOT EXISTS does not add them.
-  const migrations: [string, string, string][] = [
-    ['prs', 'ignored', 'INTEGER NOT NULL DEFAULT 0'],
-    ['comments', 'task', 'TEXT'],
-    ['comments', 'task_source', 'TEXT'],
-    ['comments', 'clarify', 'INTEGER NOT NULL DEFAULT 0'],
-    ['prs', 'ready', 'INTEGER NOT NULL DEFAULT 0'],
-  ];
+  const migrations: [string, string, string][] = [];
   for (const [table, column, type] of migrations) {
     const cols = db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[];
-    if (cols.some((c) => c.name === column)) continue;
-    db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`);
-    // Checklist items are new: re-read every PR once, so open boxes on unchanged PRs are found too.
-    if (column === 'task') db.exec(`UPDATE prs SET gh_updated_at = ''`);
+    if (!cols.some((c) => c.name === column)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`);
   }
 
   const all = <T>(sql: string, ...params: SQLInputValue[]) => db.prepare(sql).all(...params) as unknown as T[];
@@ -279,7 +269,6 @@ export function openDb(path = join(config.stateDir, 'pr-manager.db')) {
   };
 
   return {
-    raw: db,
     all,
     get,
     run,
@@ -288,6 +277,8 @@ export function openDb(path = join(config.stateDir, 'pr-manager.db')) {
     pr: (id: number) => get<Pr>('SELECT * FROM prs WHERE id = ?', id),
     prByUrl: (url: string) => get<Pr>('SELECT * FROM prs WHERE url = ?', url),
     prs: () => all<Pr>('SELECT * FROM prs ORDER BY repo, number'),
+    /** Sessions pr-manager started; an interactive session is any other. */
+    ownSessionIds: () => new Set(all<{ session_id: string }>('SELECT session_id FROM prs WHERE session_id IS NOT NULL').map((r) => r.session_id)),
     comments: (prId: number) => all<Comment>('SELECT * FROM comments WHERE pr_id = ? ORDER BY id', prId),
     comment: (id: number) => get<Comment>('SELECT * FROM comments WHERE id = ?', id),
     questions: (prId: number) => all<Question>('SELECT * FROM questions WHERE pr_id = ? ORDER BY id', prId),

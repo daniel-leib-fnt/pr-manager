@@ -1,10 +1,37 @@
 import { batchStatus, replyFor, shouldResolve } from './batch.ts';
 import { type TaskSource, checkTask, hasProse } from './checklist.ts';
-import { type Comment, type Db, type Pr, type WorkKind, now } from './db.ts';
-import { Blocked, isDirty, localChanged, push, rebaseOntoBase, sync } from './git.ts';
-import { GithubError, findingUrl, graphql, rest } from './github.ts';
-import type { Poller } from './poller.ts';
+import { type Comment, type Db, type Pr, now } from './db.ts';
+import { Blocked, git, isDirty, localChanged, push, rebaseOntoBase, sync } from './git.ts';
+import { GithubError, findingUrl, graphql, rest, viewer } from './github.ts';
 import { changed } from './util.ts';
+
+/** New items on one of my PRs: the batch starts at `headSha` unless one is open, and the agent gets to work. */
+export function openBatch(db: Db, prId: number, headSha: string) {
+  db.update('prs', prId, { last_event_at: now(), batch_head_sha: db.pr(prId)!.batch_head_sha ?? headSha });
+  db.enqueue(prId, 'comments');
+  changed(prId);
+}
+
+/**
+ * A merge conflict on one of my PRs becomes an item: the agent rebases, the batch pushes. From the poll,
+ * one open conflict is enough, since a base that moves on while the agent works is picked up by the
+ * same rebase; a rebase failing at batch close always adds one. Returns whether an item was added.
+ */
+export function addConflict(db: Db, pr: Pr, headSha: string, baseSha: string, atClose = false): boolean {
+  const comments = db.comments(pr.id);
+  if (!atClose && comments.some((c) => c.kind === 'conflict' && ['new', 'proposal', 'accepted', 'fixed'].includes(c.state))) return false;
+  const key = `conflict:${headSha}:${baseSha}`;
+  if (comments.some((c) => c.gh_key === key)) return false;
+  db.insert('comments', {
+    pr_id: pr.id,
+    kind: 'conflict',
+    gh_key: key,
+    author: 'github',
+    body: `Merge conflicts with ${pr.base_ref} (head ${headSha.slice(0, 8)}, base ${baseSha.slice(0, 8)}). Rebase onto refs/remotes/origin/${pr.base_ref}.`,
+  });
+  openBatch(db, pr.id, headSha);
+  return true;
+}
 
 // A checklist item quotes just its line, a whole comment its beginning.
 const quote = (c: Comment) =>
@@ -80,10 +107,10 @@ const gone = (e: unknown) => e instanceof GithubError && (e.status === 404 || e.
  * Closes a complete batch on one of my PRs: re-checks GitHub, rebases, pushes once with
  * force-with-lease, then posts replies and resolves threads. Safe to re-run after a failure.
  */
-export async function closeBatch(ctx: { db: Db; poller: Poller; pr: Pr; enqueue: (k: WorkKind) => void; block: (reason: string) => void }) {
-  const { db, poller } = ctx;
+export async function closeBatch(ctx: { db: Db; pr: Pr; ingest: (pr: Pr) => Promise<number>; block: (reason: string) => void }) {
+  const { db } = ctx;
   let pr = ctx.pr;
-  if (await poller.ingest(pr)) return; // new activity joins the batch
+  if (await ctx.ingest(pr)) return; // new activity joins the batch
   if (batchStatus(db.comments(pr.id), db.questions(pr.id), db.workItems(pr.id).filter((w) => w.kind !== 'close_batch')) !== 'closable') return;
   const path = pr.worktree;
   if (!path) throw new Error('No worktree for this PR.');
@@ -99,7 +126,9 @@ export async function closeBatch(ctx: { db: Db; poller: Poller; pr: Pr; enqueue:
 
   if (await localChanged(pr, path)) {
     if (!(await rebaseOntoBase(pr, path))) {
-      ctx.enqueue('rebase');
+      const head = await git(path, ['rev-parse', 'HEAD']);
+      const base = await git(path, ['rev-parse', `refs/remotes/origin/${pr.base_ref}`]);
+      if (!addConflict(db, pr, head, base, true)) ctx.block(`Rebasing onto ${pr.base_ref} fails again at the same commits. Resolve it in ${path}, then press Retry.`);
       return;
     }
     const newSha = await push(pr, path, pr.batch_head_sha ?? pr.head_sha);
@@ -108,7 +137,7 @@ export async function closeBatch(ctx: { db: Db; poller: Poller; pr: Pr; enqueue:
     pr = db.pr(pr.id)!;
   }
 
-  const me = await poller.viewer();
+  const me = await viewer();
   const all = db.comments(pr.id);
   for (const c of all.filter((x) => x.state === 'fixed' || x.state === 'skipped')) {
     try {

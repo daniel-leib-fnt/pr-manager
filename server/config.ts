@@ -19,5 +19,4 @@ export const config = {
   webDir: env.PR_MANAGER_WEB_DIR ?? join(repoRoot, 'web/dist/web/browser'),
   promptFile: join(repoRoot, 'prompts/workflow.md'),
   claudePath: env.PR_MANAGER_CLAUDE_PATH,
-  maxPollBackoffMs: 30 * 60_000,
 };

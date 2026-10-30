@@ -13,7 +13,7 @@ import { isExcluded, recordDenied, setting, workflowPrompt } from './settings.ts
 import { bus, changed, errorMessage, notify } from './util.ts';
 
 /** Lower runs first. Answers to my input beat new work; batch closing beats both. */
-const PRIORITY: Record<WorkKind, number> = { close_batch: 0, rebase: 1, answers: 1, comments: 2, followup_review: 3, review: 3, summarize: 4 };
+const PRIORITY: Record<WorkKind, number> = { close_batch: 0, answers: 1, comments: 2, followup_review: 3, review: 3, summarize: 4 };
 
 /** Defense in depth; the real guard is that the session has no credentials (see agentEnv). */
 const DENY = ['Bash(git push *)', 'Bash(git push)', 'Bash(gh *)', 'Bash(gh)', 'Bash(curl *)', 'Bash(wget *)'];
@@ -40,7 +40,6 @@ export function createRunner({ db, poller, dashboardUrl }: RunnerDeps) {
   const running = new Map<number, AbortController>();
 
   const prUrl = (pr: Pr) => `${dashboardUrl}/pr/${pr.id}`;
-  const ownSessionIds = () => new Set(db.all<{ session_id: string }>('SELECT session_id FROM prs WHERE session_id IS NOT NULL').map((r) => r.session_id));
 
   function block(pr: Pr, reason: string) {
     db.update('prs', pr.id, { blocked: reason });
@@ -92,7 +91,7 @@ export function createRunner({ db, poller, dashboardUrl }: RunnerDeps) {
       path = await ensureWorktree(pr);
       db.update('prs', pr.id, { worktree: path });
     }
-    const sessions = interactiveSessionsIn(path, ownSessionIds());
+    const sessions = interactiveSessionsIn(path, db.ownSessionIds());
     if (sessions.length) throw new Blocked(`An interactive Claude session (${sessions[0].name ?? sessions[0].sessionId}) works in ${path}. Pause the PR or close the session, then retry.`);
     if ((await isDirty(path)) && !pr.dirty_by_agent) throw new Blocked(`${path} has uncommitted changes I did not make.`);
     const moved = await sync(db.pr(pr.id)!, path);
@@ -107,7 +106,6 @@ export function createRunner({ db, poller, dashboardUrl }: RunnerDeps) {
     if (kinds.has('summarize')) parts.push('Call get_pr and write the PR summary with set_summary.');
     if (kinds.has('comments')) parts.push('There is new activity on this PR. Call get_pr and handle every open item as the workflow describes. Update the summary if it is outdated.');
     if (kinds.has('answers')) parts.push('I answered on the dashboard. Call get_pr: implement accepted proposals and instructions, use my answers to continue with the open items.');
-    if (kinds.has('rebase')) parts.push(`Rebasing onto refs/remotes/origin/${pr.base_ref} failed with conflicts. Run the rebase, resolve trivial conflicts and finish it. If a conflict is not trivial, abort the rebase and call report_blocked.`);
     if (kinds.has('review')) parts.push('My review was requested. Call get_pr, review the full diff, and write the review draft as the workflow describes.');
     if (kinds.has('followup_review')) {
       const reRequested = items.some((i) => i.kind === 'followup_review' && i.payload?.includes('reRequested'));
@@ -217,7 +215,7 @@ export function createRunner({ db, poller, dashboardUrl }: RunnerDeps) {
     if (close) {
       db.update('work_items', close.id, { state: 'in_progress', started_at: now() });
       try {
-        await closeBatch({ db, poller, pr, enqueue: (k) => db.enqueue(pr.id, k), block: (r) => block(pr, r) });
+        await closeBatch({ db, pr, ingest: poller.ingest, block: (r) => block(pr, r) });
         db.update('work_items', close.id, { state: 'done', finished_at: now() });
       } catch (e) {
         db.update('work_items', close.id, { state: 'failed', error: errorMessage(e), finished_at: now() });
@@ -265,13 +263,12 @@ export function createRunner({ db, poller, dashboardUrl }: RunnerDeps) {
     },
     start() {
       setInterval(tick, 15_000).unref();
-      bus.on('settings', () => setImmediate(tick));
+      for (const event of ['settings', 'wake']) bus.on(event, () => setImmediate(tick));
       tick();
     },
     stop() {
       for (const abort of running.values()) abort.abort();
     },
     isRunning: (prId: number) => running.has(prId),
-    ownSessionIds,
   };
 }
