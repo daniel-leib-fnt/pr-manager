@@ -22,7 +22,7 @@ All commands need the dev shell (Node 22, claude-code). Prefix with `nix develop
 | Web dev server | `cd web && npx ng serve` (port 4200, proxies `/api`) | — |
 | Nix package | `nix build` | minutes |
 
-No CI. Before claiming done: `npm run check && npm test`, plus the web typecheck and format when `web/` changed.
+CI ([.github/workflows/check.yml](.github/workflows/check.yml)) runs `npm run check`, `npm test`, `prettier --check` on `web/src` and `nix build`, all through Nix, on push to `main` and on PRs. Before claiming done: `npm run check && npm test`, plus the web typecheck and format when `web/` changed.
 
 ## File map
 

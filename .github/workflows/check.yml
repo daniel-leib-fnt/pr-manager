@@ -1,0 +1,23 @@
+name: Check
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: cachix/install-nix-action@v31
+
+      - name: Typecheck and test the server
+        run: nix develop -c bash -c 'npm ci && npm run check && npm test'
+
+      - name: Check the web code style
+        run: nix develop -c bash -c 'cd web && npm ci && npx prettier --check src'
+
+      # Builds the web app and the package, which also checks the npmDepsHash values.
+      - name: Build
+        run: nix build -L
