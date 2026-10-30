@@ -76,6 +76,10 @@ export function createPoller({ db, dashboardUrl, ownSessionIds, wake }: PollerDe
       }
     }
     for (const pr of db.all<Pr>(`SELECT * FROM prs WHERE ignored = 1 AND (worktree IS NOT NULL OR session_id IS NOT NULL)`)) await discard(pr);
+    // Closed PRs leave the poll, so ones that closed before they could be cleaned up are swept here.
+    if (setting('autoRemoveMergedWorktrees')) {
+      for (const pr of db.all<Pr>(`SELECT * FROM prs WHERE state != 'open' AND blocked IS NULL AND agent_running = 0`).filter(removable)) await cleanup(pr);
+    }
     db.kvSet('lastPoll', now());
     checkBatches();
     wake();
@@ -114,7 +118,7 @@ export function createPoller({ db, dashboardUrl, ownSessionIds, wake }: PollerDe
 
     if (newState !== 'open') {
       if (pr.agent_running) return;
-      if ((newState === 'merged' || newState === 'dropped') && setting('autoRemoveMergedWorktrees')) await cleanup(pr);
+      if (removable(pr) && setting('autoRemoveMergedWorktrees')) await cleanup(pr);
       if (prev.state !== newState) changed(pr.id);
       return;
     }
@@ -139,14 +143,18 @@ export function createPoller({ db, dashboardUrl, ownSessionIds, wake }: PollerDe
     if (isChanged) changed(pr.id);
   }
 
+  /**
+   * PRs whose worktree goes away on its own: merged ones, withdrawn review requests, and closed reviews.
+   * My own closed PRs keep theirs, since they may hold work or be reopened.
+   */
+  const removable = (pr: Pr) => pr.state === 'merged' || pr.state === 'dropped' || (pr.state === 'closed' && pr.role === 'review');
+
   async function cleanup(pr: Pr) {
-    if (!pr.worktree) {
-      db.run('DELETE FROM prs WHERE id = ?', pr.id);
-      changed(pr.id);
-      return;
-    }
     try {
-      await removeWorktree(pr, ownSessionIds());
+      if (pr.worktree) await removeWorktree(pr, ownSessionIds());
+      if (pr.session_id) {
+        await deleteSession(pr.session_id, pr.worktree ? { dir: pr.worktree } : undefined).catch((e) => console.error(`delete session of ${pr.url}:`, errorMessage(e)));
+      }
       db.run('DELETE FROM prs WHERE id = ?', pr.id);
       clearNotification(`cleanup:${pr.id}`);
     } catch (e) {
