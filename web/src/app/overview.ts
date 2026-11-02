@@ -79,7 +79,11 @@ function loadCollapsed(): Set<Group> {
                     @if (pr.review_state === 'draft') {
                       <span class="chip need">review draft</span>
                     }
-                    @if (pr.counts.pending) {
+                    @if (pr.batch === 'closable') {
+                      <span class="chip live" [title]="pr.counts.pending + ' item(s) to push'"
+                        >waiting for push</span
+                      >
+                    } @else if (pr.counts.pending) {
                       <span class="chip">{{ pr.counts.pending }} to push</span>
                     }
                     @if (pr.check_state) {

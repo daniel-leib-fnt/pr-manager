@@ -22,8 +22,12 @@ function groupOf(db: Db, pr: Pr): Group {
   const comments = db.comments(pr.id);
   const questions = db.questions(pr.id);
   if (comments.some((c) => c.state === 'proposal') || questions.some((q) => q.state === 'open') || pr.review_state === 'draft') return 'needs_me';
-  if (db.workItems(pr.id).some((w) => w.state === 'queued' && runnable(pr, w.kind))) return 'queued';
-  if (pr.ready && pr.role === 'own' && batchStatus(comments, questions, db.workItems(pr.id)) === 'none') return 'ready';
+  const work = db.workItems(pr.id);
+  if (work.some((w) => w.state === 'queued' && runnable(pr, w.kind))) return 'queued';
+  const batch = pr.role === 'own' ? batchStatus(comments, questions, work) : 'none';
+  // Fixes waiting out the quiet time or being pushed right now: the push is up next, not someone else.
+  if (batch === 'closable') return 'queued';
+  if (pr.ready && batch === 'none') return 'ready';
   if (pr.review_out_of_date) return 'out_of_date';
   return 'waiting';
 }
