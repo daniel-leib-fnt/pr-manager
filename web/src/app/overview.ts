@@ -1,6 +1,6 @@
 import { DatePipe } from '@angular/common';
 import { Component, computed, effect, inject, signal } from '@angular/core';
-import { RouterLink } from '@angular/router';
+import { RouterLink, RouterLinkActive } from '@angular/router';
 import { Api, type Group, type Pr } from './api';
 
 const GROUPS: { key: Group; label: string }[] = [
@@ -30,7 +30,7 @@ function loadCollapsed(): Set<Group> {
 
 @Component({
   selector: 'app-overview',
-  imports: [RouterLink, DatePipe],
+  imports: [RouterLink, RouterLinkActive, DatePipe],
   template: `
     <div class="toolbar">
       <span class="muted"
@@ -51,7 +51,7 @@ function loadCollapsed(): Set<Group> {
           <ul class="pr-list">
             @for (pr of g.prs; track pr.id) {
               <li>
-                <a [routerLink]="['/pr', pr.id]" class="pr-row">
+                <a [routerLink]="['/pr', pr.id]" routerLinkActive="active" class="pr-row">
                   <span class="badge" [class]="pr.role">{{
                     pr.role === 'own' ? 'mine' : 'review'
                   }}</span>

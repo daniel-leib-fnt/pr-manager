@@ -128,9 +128,10 @@ export class Transcript {
     effect(() => {
       const id = this.prId();
       this.sessionId();
-      void this.api
-        .transcript(id)
-        .then((msgs) => this.entries.set(msgs.map(toEntry).filter((e): e is Entry => !!e)));
+      this.entries.set([]);
+      void this.api.transcript(id).then((msgs) => {
+        if (id === this.prId()) this.entries.set(msgs.map(toEntry).filter((e): e is Entry => !!e));
+      });
     });
     const sub = this.api.events.subscribe((e) => {
       if (e.prId !== this.prId()) return;

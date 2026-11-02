@@ -432,8 +432,10 @@ export class PrPage {
   });
 
   constructor() {
+    // Switching PRs in the sidebar reuses this page: drop the previous PR right away.
     effect(() => {
       const id = this.prId();
+      this.data.set(null);
       this.draft.set(loadDraft(id));
     });
     effect(() => {
@@ -444,6 +446,7 @@ export class PrPage {
 
   private async load(id: number) {
     const d = await this.api.pr(id);
+    if (id !== this.prId()) return; // a slower answer for a PR that is no longer open
     this.data.set(d);
     const draft = this.draft();
     if (!draft.verdict && d.pr.review_verdict) draft.verdict = d.pr.review_verdict;
