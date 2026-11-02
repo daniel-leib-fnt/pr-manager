@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
-import { existsSync, mkdirSync } from 'node:fs';
-import { join } from 'node:path';
+import { existsSync, mkdirSync, realpathSync } from 'node:fs';
+import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { type Options, type SDKResultMessage, query } from '@anthropic-ai/claude-agent-sdk';
 import { AGENT_TOOL_SERVER, createAgentTools } from './agent-tools.ts';
 import { adoptBatchHead, closeBatch } from './actions.ts';
@@ -17,6 +17,39 @@ const PRIORITY: Record<WorkKind, number> = { close_batch: 0, answers: 1, comment
 
 /** Defense in depth; the real guard is that the session has no credentials (see agentEnv). */
 const DENY = ['Bash(git push *)', 'Bash(git push)', 'Bash(gh *)', 'Bash(gh)', 'Bash(curl *)', 'Bash(wget *)'];
+
+const FILE_TOOLS = new Set(['Write', 'Edit', 'MultiEdit', 'NotebookEdit']);
+/** Project settings can define hooks and allow rules for later sessions, so an agent must never write them. */
+const PROTECTED = /(^|\/)\.claude\/settings[^/]*\.json$/;
+
+/** The real path of `p`, or of its nearest existing ancestor joined with the rest, so symlinks cannot lead outside. */
+function realish(p: string): string {
+  let dir = p;
+  const rest: string[] = [];
+  while (!existsSync(dir)) {
+    rest.unshift(dir.slice(dirname(dir).length + 1));
+    const up = dirname(dir);
+    if (up === dir) return p;
+    dir = up;
+  }
+  return join(realpathSync(dir), ...rest);
+}
+
+/**
+ * File edits the permission callback allows: inside the worktree, which accept-edits mode already covers except for
+ * protected paths such as `.claude/`, so skills, agents and commands of the repository can be changed like any file.
+ * `.git` and the project settings stay off limits.
+ */
+export function fileWriteAllowed(tool: string, input: Record<string, unknown>, worktree: string): boolean {
+  if (!FILE_TOOLS.has(tool)) return false;
+  const target = input['file_path'] ?? input['notebook_path'];
+  if (typeof target !== 'string' || !target) return false;
+  const root = realish(resolve(worktree));
+  const rel = relative(root, realish(resolve(root, target)));
+  if (!rel || rel.startsWith('..') || isAbsolute(rel)) return false;
+  const posix = rel.split(sep).join('/');
+  return posix.split('/')[0] !== '.git' && !PROTECTED.test(posix);
+}
 
 type Candidate = Pick<WorkItem, 'id' | 'pr_id' | 'kind'> & { check_state: string | null; repo: string };
 
@@ -156,6 +189,7 @@ export function createRunner({ db, poller, dashboardUrl }: RunnerDeps) {
         strictMcpConfig: true,
         mcpServers: { [AGENT_TOOL_SERVER]: createAgentTools(db, pr.id, (reason) => block(db.pr(pr.id)!, reason)) },
         canUseTool: async (name, input) => {
+          if (fileWriteAllowed(name, input, path)) return { behavior: 'allow', updatedInput: input };
           const detail = name === 'Bash' ? String((input as { command?: unknown }).command ?? '') : JSON.stringify(input).slice(0, 200);
           console.warn(`denied tool for ${pr.repo}#${pr.number}: ${name} ${detail}`);
           bus.emit('event', { type: 'denied', prId: pr.id, tool: name, detail, at: now() });
