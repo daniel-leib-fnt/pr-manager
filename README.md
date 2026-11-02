@@ -55,6 +55,8 @@ services.pr-manager = {
 };
 ```
 
+Agents can use additional MCP servers, for example Jira and Confluence, through `services.pr-manager.mcpServers`. Every tool of these servers is allowed. This option exists only in Home Manager, because each server starts a program.
+
 Some things stay fixed on purpose:
 - Agents never get GitHub credentials.
 - Pushing, `gh`, `curl` and `wget` are denied even if the allowlist permits them.

@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { z } from 'zod';
-import { config } from './config.ts';
+import { config, extraMcpServers } from './config.ts';
 import type { Db } from './db.ts';
 import { bus } from './util.ts';
 
@@ -238,6 +238,7 @@ export function describeNixOnly() {
     { label: 'Checkout root', value: config.srcRoot, option: 'services.pr-manager.checkoutRoot' },
     { label: 'Worktree directory', value: config.worktreeDir, option: 'services.pr-manager.worktreeDir' },
     { label: 'State directory', value: config.stateDir, option: 'services.pr-manager.stateDir' },
+    { label: 'MCP servers for agents', value: Object.keys(extraMcpServers()).join(', ') || 'none', option: 'services.pr-manager.mcpServers' },
   ];
 }
 

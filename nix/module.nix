@@ -5,6 +5,7 @@ let
   cfg = config.services.pr-manager;
   json = pkgs.formats.json { };
   settingsFile = json.generate "pr-manager-settings.json" cfg.settings;
+  mcpServersFile = json.generate "pr-manager-mcp-servers.json" cfg.mcpServers;
 
   # Exports go through the shell, not Environment=: systemd strips quotes from values.
   # The Claude OAuth token is read from the Secret Service, so it never lands in the Nix store;
@@ -18,6 +19,7 @@ let
     export CLAUDE_CODE_OAUTH_TOKEN="$token"
     export PR_MANAGER_PORT=${toString cfg.port}
     export PR_MANAGER_SETTINGS=${settingsFile}
+    export PR_MANAGER_MCP_SERVERS=${mcpServersFile}
     export PR_MANAGER_SRC_ROOT=${lib.escapeShellArg cfg.checkoutRoot}
     export PR_MANAGER_WORKTREE_DIR=${lib.escapeShellArg cfg.worktreeDir}
     export PR_MANAGER_STATE_DIR=${lib.escapeShellArg cfg.stateDir}
@@ -91,6 +93,26 @@ in
         replyHeader ({viewer} is replaced), autoRemoveMergedWorktrees, allowedTools,
         maxParallelSessions, model, maxTurns, maxBudgetUsd, notify ("input", "review_draft",
         "blocked", "error"). Unknown keys and invalid values are logged and ignored.
+      '';
+    };
+
+    mcpServers = lib.mkOption {
+      type = json.type;
+      default = { };
+      example = lib.literalExpression ''
+        {
+          mcp-atlassian = {
+            type = "stdio";
+            command = "mcp-atlassian-keyring";
+            env.JIRA_URL = "https://jira.example.com";
+          };
+        }
+      '';
+      description = ''
+        Additional MCP servers for the agent sessions, in the Claude Code `mcpServers` format
+        (stdio with command, args and env, or http/sse with url and headers). Agents may use every
+        tool of these servers. The definitions land in the Nix store, so keep secrets out of them:
+        let the command fetch its tokens, for example from the Secret Service.
       '';
     };
 

@@ -63,3 +63,19 @@ test('the pool never picks a running PR and follows priority', () => {
   assert.equal(selectNext(rows, new Set([11])), 10);
   assert.equal(selectNext(rows, new Set([10, 11])), undefined);
 });
+
+test('extra MCP servers are read from the Nix file and checked', async () => {
+  const { extraMcpServers } = await import('../server/config.ts');
+  const dir = mkdtempSync(join(tmpdir(), 'pr-manager-mcp-'));
+  const file = (v: unknown) => {
+    const f = join(dir, `${Math.random()}.json`);
+    writeFileSync(f, JSON.stringify(v));
+    return f;
+  };
+  assert.deepEqual(extraMcpServers(undefined), {});
+  const servers = { 'mcp-atlassian': { type: 'stdio', command: 'mcp-atlassian-keyring', env: { JIRA_URL: 'https://jira' } }, docs: { type: 'http', url: 'https://docs' } };
+  assert.deepEqual(extraMcpServers(file(servers)), servers);
+  assert.throws(() => extraMcpServers(file({ 'bad name': { command: 'x' } })));
+  assert.throws(() => extraMcpServers(file({ empty: {} })));
+  assert.throws(() => extraMcpServers(file([])));
+});

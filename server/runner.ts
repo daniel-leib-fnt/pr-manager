@@ -5,7 +5,7 @@ import { type Options, type SDKResultMessage, query } from '@anthropic-ai/claude
 import { AGENT_TOOL_SERVER, createAgentTools } from './agent-tools.ts';
 import { adoptBatchHead, closeBatch } from './actions.ts';
 import { runnable } from './batch.ts';
-import { config } from './config.ts';
+import { config, extraMcpServers } from './config.ts';
 import { type Db, type Pr, type WorkItem, type WorkKind, now } from './db.ts';
 import { Blocked, ensureWorktree, fetchBase, git, interactiveSessionsIn, isDirty, sync } from './git.ts';
 import type { Poller } from './poller.ts';
@@ -175,6 +175,7 @@ export function createRunner({ db, poller, dashboardUrl }: RunnerDeps) {
     let result: SDKResultMessage | undefined;
     let error: string | undefined;
     try {
+      const extra = extraMcpServers();
       const options: Options = {
         cwd: path,
         ...(resume ? { resume } : { sessionId }),
@@ -183,11 +184,12 @@ export function createRunner({ db, poller, dashboardUrl }: RunnerDeps) {
         settingSources: ['user', 'project'],
         permissionMode: 'acceptEdits',
         ...(model ? { model } : {}),
-        allowedTools: [...setting('allowedTools'), `mcp__${AGENT_TOOL_SERVER}`],
+        // Tool search loads deferred MCP tools; every tool of a configured MCP server may be used.
+        allowedTools: [...setting('allowedTools'), 'ToolSearch', `mcp__${AGENT_TOOL_SERVER}`, ...Object.keys(extra).map((name) => `mcp__${name}`)],
         disallowedTools: ['AskUserQuestion'],
         settings: { permissions: { deny: DENY } },
         strictMcpConfig: true,
-        mcpServers: { [AGENT_TOOL_SERVER]: createAgentTools(db, pr.id, (reason) => block(db.pr(pr.id)!, reason)) },
+        mcpServers: { ...extra, [AGENT_TOOL_SERVER]: createAgentTools(db, pr.id, (reason) => block(db.pr(pr.id)!, reason)) },
         canUseTool: async (name, input) => {
           if (fileWriteAllowed(name, input, path)) return { behavior: 'allow', updatedInput: input };
           const detail = name === 'Bash' ? String((input as { command?: unknown }).command ?? '') : JSON.stringify(input).slice(0, 200);
