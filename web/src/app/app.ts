@@ -9,8 +9,7 @@ const MIN_WIDTH = 260;
 /** Room the detail column keeps at least. */
 const MIN_DETAIL = 400;
 
-const clampWidth = (w: number) =>
-  Math.round(Math.max(MIN_WIDTH, Math.min(w, window.innerWidth - MIN_DETAIL)));
+const clampWidth = (w: number) => Math.round(Math.max(MIN_WIDTH, Math.min(w, window.innerWidth - MIN_DETAIL)));
 
 /** The sidebar width is remembered per browser; storage can be unavailable. */
 function loadWidth(): number {
@@ -37,9 +36,7 @@ function saveWidth(w: number) {
   template: `
     <header class="top">
       <a routerLink="/" class="brand">pr-manager</a>
-      <span class="conn" [class.off]="!api.connected()">{{
-        api.connected() ? 'live' : 'offline'
-      }}</span>
+      <span class="conn" [class.off]="!api.connected()">{{ api.connected() ? 'live' : 'offline' }}</span>
       <a routerLink="/settings" class="nav-right">Settings</a>
     </header>
     <div class="layout" [style.--sidebar-width.px]="width()">

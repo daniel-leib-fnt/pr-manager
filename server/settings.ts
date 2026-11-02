@@ -39,7 +39,13 @@ interface Def<T> {
 const def = <T>(d: Def<T>) => d;
 
 export const DEFS = {
-  pollIntervalMinutes: def({ group: 'Polling', label: 'Poll interval (minutes)', type: 'number', schema: z.number().int().min(1).max(120), default: 2 }),
+  pollIntervalMinutes: def({
+    group: 'Polling',
+    label: 'Poll interval (minutes)',
+    type: 'number',
+    schema: z.number().int().min(1).max(120),
+    default: 2,
+  }),
   pollDays: def({
     group: 'Polling',
     label: 'Active days',
@@ -48,7 +54,13 @@ export const DEFS = {
     default: [1, 2, 3, 4, 5],
   }),
   pollFromHour: def({ group: 'Polling', label: 'Active from (hour)', type: 'number', schema: z.number().int().min(0).max(23), default: 7 }),
-  pollToHour: def({ group: 'Polling', label: 'Active until (hour, exclusive)', type: 'number', schema: z.number().int().min(1).max(24), default: 18 }),
+  pollToHour: def({
+    group: 'Polling',
+    label: 'Active until (hour, exclusive)',
+    type: 'number',
+    schema: z.number().int().min(1).max(24),
+    default: 18,
+  }),
   ownQuery: def({
     group: 'Scope',
     label: 'Search query for my PRs',
@@ -81,8 +93,21 @@ export const DEFS = {
     schema: z.boolean(),
     default: true,
   }),
-  autoFollowupOnReRequest: def({ group: 'Reviews', label: 'Follow-up review when my review is re-requested', type: 'boolean', schema: z.boolean(), default: true }),
-  reviewGuidelines: def({ group: 'Reviews', label: 'Review guidelines', help: 'Inserted into the agent prompt for reviews.', type: 'text', schema: z.string().min(1), default: DEFAULT_REVIEW_GUIDELINES }),
+  autoFollowupOnReRequest: def({
+    group: 'Reviews',
+    label: 'Follow-up review when my review is re-requested',
+    type: 'boolean',
+    schema: z.boolean(),
+    default: true,
+  }),
+  reviewGuidelines: def({
+    group: 'Reviews',
+    label: 'Review guidelines',
+    help: 'Inserted into the agent prompt for reviews.',
+    type: 'text',
+    schema: z.string().min(1),
+    default: DEFAULT_REVIEW_GUIDELINES,
+  }),
   smallChangeRubric: def({
     group: 'My PRs',
     label: 'What counts as a small change',
@@ -91,8 +116,22 @@ export const DEFS = {
     schema: z.string().min(1),
     default: DEFAULT_RUBRIC,
   }),
-  maxCiAttempts: def({ group: 'My PRs', label: 'Automatic CI fix attempts', help: 'After that, CI failures become proposals.', type: 'number', schema: z.number().int().min(0).max(10), default: 2 }),
-  batchQuietMinutes: def({ group: 'My PRs', label: 'Batch quiet time (minutes)', help: 'A complete batch is pushed only after no new activity for this long.', type: 'number', schema: z.number().int().min(0).max(120), default: 2 }),
+  maxCiAttempts: def({
+    group: 'My PRs',
+    label: 'Automatic CI fix attempts',
+    help: 'After that, CI failures become proposals.',
+    type: 'number',
+    schema: z.number().int().min(0).max(10),
+    default: 2,
+  }),
+  batchQuietMinutes: def({
+    group: 'My PRs',
+    label: 'Batch quiet time (minutes)',
+    help: 'A complete batch is pushed only after no new activity for this long.',
+    type: 'number',
+    schema: z.number().int().min(0).max(120),
+    default: 2,
+  }),
   resolveThreads: def({
     group: 'My PRs',
     label: 'Resolve threads after replying',
@@ -113,7 +152,13 @@ export const DEFS = {
     schema: z.string(),
     default: '🤖 **Claude on behalf of @{viewer}**',
   }),
-  autoRemoveMergedWorktrees: def({ group: 'My PRs', label: 'Remove worktrees of merged PRs automatically', type: 'boolean', schema: z.boolean(), default: true }),
+  autoRemoveMergedWorktrees: def({
+    group: 'My PRs',
+    label: 'Remove worktrees of merged PRs automatically',
+    type: 'boolean',
+    schema: z.boolean(),
+    default: true,
+  }),
   allowedTools: def({
     group: 'Agent',
     label: 'Allowed tools',
@@ -130,9 +175,22 @@ export const DEFS = {
     schema: z.number().int().min(1).max(8),
     default: 1,
   }),
-  model: def({ group: 'Agent', label: 'Model', help: 'Empty for the Claude Code default, otherwise a model name or alias such as opus.', type: 'string', schema: z.string(), default: '' }),
+  model: def({
+    group: 'Agent',
+    label: 'Model',
+    help: 'Empty for the Claude Code default, otherwise a model name or alias such as opus.',
+    type: 'string',
+    schema: z.string(),
+    default: '',
+  }),
   maxTurns: def({ group: 'Agent', label: 'Max turns per run', type: 'number', schema: z.number().int().min(1).max(2000), default: 200 }),
-  maxBudgetUsd: def({ group: 'Agent', label: 'Max budget per run (USD)', type: 'number', schema: z.number().min(0.1).max(1000), default: 25 }),
+  maxBudgetUsd: def({
+    group: 'Agent',
+    label: 'Max budget per run (USD)',
+    type: 'number',
+    schema: z.number().min(0.1).max(1000),
+    default: 25,
+  }),
   notify: def({
     group: 'Notifications',
     label: 'Desktop notifications for',
@@ -238,7 +296,11 @@ export function describeNixOnly() {
     { label: 'Checkout root', value: config.srcRoot, option: 'services.pr-manager.checkoutRoot' },
     { label: 'Worktree directory', value: config.worktreeDir, option: 'services.pr-manager.worktreeDir' },
     { label: 'State directory', value: config.stateDir, option: 'services.pr-manager.stateDir' },
-    { label: 'MCP servers for agents', value: Object.keys(extraMcpServers()).join(', ') || 'none', option: 'services.pr-manager.mcpServers' },
+    {
+      label: 'MCP servers for agents',
+      value: Object.keys(extraMcpServers()).join(', ') || 'none',
+      option: 'services.pr-manager.mcpServers',
+    },
   ];
 }
 
@@ -252,7 +314,12 @@ export function workflowPrompt(template = readFileSync(config.promptFile, 'utf8'
   return template
     .replace('{{SMALL_CHANGE_RUBRIC}}', setting('smallChangeRubric'))
     .replace('{{REVIEW_GUIDELINES}}', setting('reviewGuidelines'))
-    .replace('{{ALLOWED_TOOLS}}', setting('allowedTools').map((t) => `- \`${t}\``).join('\n'));
+    .replace(
+      '{{ALLOWED_TOOLS}}',
+      setting('allowedTools')
+        .map((t) => `- \`${t}\``)
+        .join('\n'),
+    );
 }
 
 export const isExcluded = (repo: string) => setting('excludedRepos').some((r) => r.toLowerCase() === repo.toLowerCase());
@@ -270,7 +337,10 @@ interface DeniedCall {
 /** The narrowest useful allow rule for a denied call: Bash by its first command word. */
 export function proposeRule(tool: string, detail: string): string {
   if (tool !== 'Bash') return tool;
-  const words = detail.trim().split(/\s+/).filter((w) => !/^\w+=/.test(w));
+  const words = detail
+    .trim()
+    .split(/\s+/)
+    .filter((w) => !/^\w+=/.test(w));
   const first = words[0] ?? '';
   return first ? `Bash(${first} *)` : 'Bash';
 }

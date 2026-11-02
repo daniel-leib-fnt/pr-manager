@@ -6,7 +6,12 @@ test('finds checked and unchecked task lines outside code blocks', () => {
   const body = '- [ ] update `README.md`\r\n* [x] done\n+ [ ] third\n```\n- [ ] in code\n```\n- [] not a task\n> - [ ] quoted';
   assert.deepEqual(
     parseTasks(body).map((t) => [t.text, t.checked]),
-    [['update `README.md`', false], ['done', true], ['third', false], ['quoted', false]],
+    [
+      ['update `README.md`', false],
+      ['done', true],
+      ['third', false],
+      ['quoted', false],
+    ],
   );
 });
 

@@ -24,7 +24,9 @@ export const config = {
 };
 
 /** A stdio or remote MCP server definition, in the shape the Agent SDK takes. */
-export type McpServer = { type?: 'stdio'; command: string; args?: string[]; env?: Record<string, string> } | { type: 'http' | 'sse'; url: string; headers?: Record<string, string> };
+export type McpServer =
+  | { type?: 'stdio'; command: string; args?: string[]; env?: Record<string, string> }
+  | { type: 'http' | 'sse'; url: string; headers?: Record<string, string> };
 
 /**
  * Additional MCP servers for agent sessions, from services.pr-manager.mcpServers. Every tool of
@@ -38,7 +40,8 @@ export function extraMcpServers(file = config.mcpServersFile): Record<string, Mc
   for (const [name, def] of Object.entries(parsed)) {
     if (!/^[A-Za-z0-9_-]+$/.test(name)) throw new Error(`${file}: invalid MCP server name ${name}`);
     const d = def as Record<string, unknown> | null;
-    if (!d || (typeof d['command'] !== 'string' && typeof d['url'] !== 'string')) throw new Error(`${file}: MCP server ${name} needs a command or a url`);
+    if (!d || (typeof d['command'] !== 'string' && typeof d['url'] !== 'string'))
+      throw new Error(`${file}: MCP server ${name} needs a command or a url`);
     out[name] = d as McpServer;
   }
   return out;

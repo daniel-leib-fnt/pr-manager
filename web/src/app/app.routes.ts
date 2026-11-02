@@ -6,7 +6,9 @@ import { SettingsPage } from './settings';
 /** The detail column before a PR is chosen; the PR list itself lives in the sidebar. */
 @Component({
   selector: 'app-no-selection',
-  template: `<p class="muted empty">Select a pull request on the left.</p>`,
+  template: `
+    <p class="muted empty">Select a pull request on the left.</p>
+  `,
 })
 class NoSelection {}
 

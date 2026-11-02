@@ -26,10 +26,7 @@ function fromDraft(s: Setting, draft: unknown): unknown {
   imports: [FormsModule],
   template: `
     <h1>Settings</h1>
-    <p class="muted">
-      Changes apply on the next poll or agent run. Reset returns to the Home Manager value or the
-      built-in default.
-    </p>
+    <p class="muted">Changes apply on the next poll or agent run. Reset returns to the Home Manager value or the built-in default.</p>
     @if (error()) {
       <div class="banner error">{{ error() }}</div>
     }
@@ -48,9 +45,10 @@ function fromDraft(s: Setting, draft: unknown): unknown {
             }
             @switch (s.type) {
               @case ('boolean') {
-                <label class="inline"
-                  ><input type="checkbox" [(ngModel)]="drafts[s.key]" /> enabled</label
-                >
+                <label class="inline">
+                  <input type="checkbox" [(ngModel)]="drafts[s.key]" />
+                  enabled
+                </label>
               }
               @case ('number') {
                 <input type="number" class="narrow" [(ngModel)]="drafts[s.key]" />
@@ -68,28 +66,20 @@ function fromDraft(s: Setting, draft: unknown): unknown {
               @case ('days') {
                 <div class="choice">
                   @for (d of days; track $index) {
-                    <label class="inline"
-                      ><input
-                        type="checkbox"
-                        [checked]="has(s.key, $index)"
-                        (change)="flip(s.key, $index)"
-                      />
-                      {{ d }}</label
-                    >
+                    <label class="inline">
+                      <input type="checkbox" [checked]="has(s.key, $index)" (change)="flip(s.key, $index)" />
+                      {{ d }}
+                    </label>
                   }
                 </div>
               }
               @case ('multi') {
                 <div class="choice">
                   @for (o of s.options; track o.value) {
-                    <label class="inline"
-                      ><input
-                        type="checkbox"
-                        [checked]="has(s.key, o.value)"
-                        (change)="flip(s.key, o.value)"
-                      />
-                      {{ o.label }}</label
-                    >
+                    <label class="inline">
+                      <input type="checkbox" [checked]="has(s.key, o.value)" (change)="flip(s.key, o.value)" />
+                      {{ o.label }}
+                    </label>
                   }
                 </div>
               }
@@ -108,13 +98,12 @@ function fromDraft(s: Setting, draft: unknown): unknown {
         @if (g.name === 'Agent' && denied().length) {
           <div class="setting">
             <strong>Recently denied tool calls</strong>
-            <p class="muted small">
-              Allow adds the proposed rule to the allowed tools; edit it first if it is too broad.
-            </p>
+            <p class="muted small">Allow adds the proposed rule to the allowed tools; edit it first if it is too broad.</p>
             <ul class="items">
               @for (d of denied(); track $index) {
                 <li>
-                  <code>{{ d.tool }}</code> {{ d.pr }}
+                  <code>{{ d.tool }}</code>
+                  {{ d.pr }}
                   <span class="muted">{{ d.detail.slice(0, 160) }}</span>
                   <div class="choice">
                     <input class="grow" [(ngModel)]="d.rule" />
@@ -130,14 +119,12 @@ function fromDraft(s: Setting, draft: unknown): unknown {
 
     <section class="card">
       <h2>Home Manager only</h2>
-      <p class="muted small">
-        These need a rebuild because the daemon needs them before it starts or because changing them
-        moves files.
-      </p>
+      <p class="muted small">These need a rebuild because the daemon needs them before it starts or because changing them moves files.</p>
       <ul class="items">
         @for (n of nixOnly(); track n.option) {
           <li>
-            <strong>{{ n.label }}:</strong> <code>{{ n.value }}</code>
+            <strong>{{ n.label }}:</strong>
+            <code>{{ n.value }}</code>
             <span class="muted">({{ n.option }})</span>
           </li>
         }
@@ -219,8 +206,7 @@ export class SettingsPage {
   }
 
   protected allow(d: DeniedCall) {
-    const current =
-      (this.settings().find((s) => s.key === 'allowedTools')?.value as string[]) ?? [];
+    const current = (this.settings().find((s) => s.key === 'allowedTools')?.value as string[]) ?? [];
     if (current.includes(d.rule)) return;
     void this.run(async () => {
       const res = await this.api.saveSettings({ allowedTools: [...current, d.rule.trim()] });

@@ -125,7 +125,10 @@ export function createRunner({ db, poller, dashboardUrl }: RunnerDeps) {
       db.update('prs', pr.id, { worktree: path });
     }
     const sessions = interactiveSessionsIn(path, db.ownSessionIds());
-    if (sessions.length) throw new Blocked(`An interactive Claude session (${sessions[0].name ?? sessions[0].sessionId}) works in ${path}. Pause the PR or close the session, then retry.`);
+    if (sessions.length)
+      throw new Blocked(
+        `An interactive Claude session (${sessions[0].name ?? sessions[0].sessionId}) works in ${path}. Pause the PR or close the session, then retry.`,
+      );
     if ((await isDirty(path)) && !pr.dirty_by_agent) throw new Blocked(`${path} has uncommitted changes I did not make.`);
     const moved = await sync(db.pr(pr.id)!, path);
     if (moved) await adoptBatchHead(db, db.pr(pr.id)!, moved, path);
@@ -135,11 +138,21 @@ export function createRunner({ db, poller, dashboardUrl }: RunnerDeps) {
 
   function prompt(pr: Pr, kinds: Set<WorkKind>, items: WorkItem[]): string {
     const parts: string[] = [];
-    if (pr.interrupted) parts.push('Your previous run on this PR was interrupted by a restart. Check the worktree: continue or discard your own unfinished changes.');
+    if (pr.interrupted)
+      parts.push(
+        'Your previous run on this PR was interrupted by a restart. Check the worktree: continue or discard your own unfinished changes.',
+      );
     if (kinds.has('summarize')) parts.push('Call get_pr and write the PR summary with set_summary.');
-    if (kinds.has('comments')) parts.push('There is new activity on this PR. Call get_pr and handle every open item as the workflow describes. Update the summary if it is outdated.');
-    if (kinds.has('answers')) parts.push('I answered on the dashboard. Call get_pr: implement accepted proposals and instructions, use my answers to continue with the open items.');
-    if (kinds.has('review')) parts.push('My review was requested. Call get_pr, review the full diff, and write the review draft as the workflow describes.');
+    if (kinds.has('comments'))
+      parts.push(
+        'There is new activity on this PR. Call get_pr and handle every open item as the workflow describes. Update the summary if it is outdated.',
+      );
+    if (kinds.has('answers'))
+      parts.push(
+        'I answered on the dashboard. Call get_pr: implement accepted proposals and instructions, use my answers to continue with the open items.',
+      );
+    if (kinds.has('review'))
+      parts.push('My review was requested. Call get_pr, review the full diff, and write the review draft as the workflow describes.');
     if (kinds.has('followup_review')) {
       const reRequested = items.some((i) => i.kind === 'followup_review' && i.payload?.includes('reRequested'));
       parts.push(
@@ -165,7 +178,10 @@ export function createRunner({ db, poller, dashboardUrl }: RunnerDeps) {
     const resume = pr.session_id ?? undefined;
     const sessionId = resume ?? randomUUID();
     const text = prompt(pr, kinds, items);
-    const answeredIds = db.questions(pr.id).filter((q) => q.state === 'answered').map((q) => q.id);
+    const answeredIds = db
+      .questions(pr.id)
+      .filter((q) => q.state === 'answered')
+      .map((q) => q.id);
     for (const i of items) db.update('work_items', i.id, { state: 'in_progress', started_at: now() });
     db.update('prs', pr.id, { session_id: sessionId, agent_running: 1, interrupted: 0 });
     changed(pr.id);
@@ -185,7 +201,12 @@ export function createRunner({ db, poller, dashboardUrl }: RunnerDeps) {
         permissionMode: 'acceptEdits',
         ...(model ? { model } : {}),
         // Tool search loads deferred MCP tools; every tool of a configured MCP server may be used.
-        allowedTools: [...setting('allowedTools'), 'ToolSearch', `mcp__${AGENT_TOOL_SERVER}`, ...Object.keys(extra).map((name) => `mcp__${name}`)],
+        allowedTools: [
+          ...setting('allowedTools'),
+          'ToolSearch',
+          `mcp__${AGENT_TOOL_SERVER}`,
+          ...Object.keys(extra).map((name) => `mcp__${name}`),
+        ],
         disallowedTools: ['AskUserQuestion'],
         settings: { permissions: { deny: DENY } },
         strictMcpConfig: true,
@@ -196,7 +217,10 @@ export function createRunner({ db, poller, dashboardUrl }: RunnerDeps) {
           console.warn(`denied tool for ${pr.repo}#${pr.number}: ${name} ${detail}`);
           bus.emit('event', { type: 'denied', prId: pr.id, tool: name, detail, at: now() });
           recordDenied({ at: now(), pr: `${pr.repo}#${pr.number}`, tool: name, detail });
-          return { behavior: 'deny', message: `${name} is not allowed in pr-manager sessions. Continue without it; if it blocks you, say so in your final message.` };
+          return {
+            behavior: 'deny',
+            message: `${name} is not allowed in pr-manager sessions. Continue without it; if it blocks you, say so in your final message.`,
+          };
         },
         env: agentEnv(),
         maxTurns: setting('maxTurns'),
@@ -209,7 +233,8 @@ export function createRunner({ db, poller, dashboardUrl }: RunnerDeps) {
         if (message.type === 'result') result = message;
       }
       if (!result) error = 'The session ended without a result.';
-      else if (result.subtype !== 'success' || result.is_error) error = `Session ended with ${result.subtype}${'result' in result ? `: ${result.result}` : ''}`;
+      else if (result.subtype !== 'success' || result.is_error)
+        error = `Session ended with ${result.subtype}${'result' in result ? `: ${result.result}` : ''}`;
     } catch (e) {
       error = errorMessage(e);
     }
@@ -228,19 +253,30 @@ export function createRunner({ db, poller, dashboardUrl }: RunnerDeps) {
 
   /** Bookkeeping after a successful run, and notifications when I am needed. */
   function afterRun(pr: Pr, kinds: Set<WorkKind>) {
-    const openQuestionComments = new Set(db.questions(pr.id).filter((q) => q.state === 'open').map((q) => q.comment_id));
+    const openQuestionComments = new Set(
+      db
+        .questions(pr.id)
+        .filter((q) => q.state === 'open')
+        .map((q) => q.comment_id),
+    );
     for (const c of db.comments(pr.id)) {
       if (pr.role === 'review' && c.kind === 'instruction' && c.state === 'accepted') db.update('comments', c.id, { state: 'done' });
       if (pr.role !== 'own' || openQuestionComments.has(c.id)) continue;
-      if (c.state === 'new') db.update('comments', c.id, { state: 'proposal', proposal: c.proposal ?? 'The agent did not triage this item. Accept to let it handle the item as it sees fit, or skip it.' });
-      if (c.state === 'accepted') db.update('comments', c.id, { state: 'proposal', note: 'The agent did not finish this item; accept again to retry.' });
+      if (c.state === 'new')
+        db.update('comments', c.id, {
+          state: 'proposal',
+          proposal: c.proposal ?? 'The agent did not triage this item. Accept to let it handle the item as it sees fit, or skip it.',
+        });
+      if (c.state === 'accepted')
+        db.update('comments', c.id, { state: 'proposal', note: 'The agent did not finish this item; accept again to retry.' });
     }
     if (kinds.has('review') || kinds.has('followup_review')) {
       db.update('prs', pr.id, { review_state: 'draft' });
       if (!pr.ignored) notify('review_draft', `Review draft ready: ${pr.repo}#${pr.number}`, pr.title, prUrl(pr));
       return;
     }
-    const waiting = db.comments(pr.id).filter((c) => c.state === 'proposal').length + db.questions(pr.id).filter((q) => q.state === 'open').length;
+    const waiting =
+      db.comments(pr.id).filter((c) => c.state === 'proposal').length + db.questions(pr.id).filter((q) => q.state === 'open').length;
     if (waiting) notify('input', `Input needed: ${pr.repo}#${pr.number}`, `${waiting} item(s) wait for you: ${pr.title}`, prUrl(pr));
     poller.checkBatches();
   }

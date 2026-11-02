@@ -1,0 +1,9 @@
+# Generated or vendored
+node_modules/
+web/.angular/
+web/dist/
+package-lock.json
+flake.lock
+
+# Prose is written by hand, not formatted
+*.md

@@ -35,11 +35,15 @@ export function addConflict(db: Db, pr: Pr, headSha: string, baseSha: string, at
 
 // A checklist item quotes just its line, a whole comment its beginning.
 const quote = (c: Comment) =>
-  c.task ? `> - [ ] ${c.task}\n\n` : `> @${c.author ?? 'ghost'}: ${c.body.split('\n').slice(0, 3).join(' ').slice(0, 200)}${c.body.length > 200 ? '…' : ''}\n\n`;
+  c.task
+    ? `> - [ ] ${c.task}\n\n`
+    : `> @${c.author ?? 'ghost'}: ${c.body.split('\n').slice(0, 3).join(' ').slice(0, 200)}${c.body.length > 200 ? '…' : ''}\n\n`;
 
 async function postReply(pr: Pr, c: Comment, text: string) {
   if (c.kind === 'thread' && c.reply_to_db_id) {
-    await rest('POST', `/repos/${pr.repo}/pulls/${pr.number}/comments/${c.reply_to_db_id}/replies`, { body: (c.task ? quote(c) : '') + text });
+    await rest('POST', `/repos/${pr.repo}/pulls/${pr.number}/comments/${c.reply_to_db_id}/replies`, {
+      body: (c.task ? quote(c) : '') + text,
+    });
   } else {
     await rest('POST', `/repos/${pr.repo}/issues/${pr.number}/comments`, { body: quote(c) + text });
   }
@@ -79,7 +83,18 @@ async function settleTask(pr: Pr, c: Comment, me: string) {
 }
 
 async function resolveThread(threadId: string) {
-  await graphql(`mutation($id: ID!) { resolveReviewThread(input: { threadId: $id }) { thread { id } } }`, { id: threadId });
+  await graphql(
+    `
+      mutation ($id: ID!) {
+        resolveReviewThread(input: { threadId: $id }) {
+          thread {
+            id
+          }
+        }
+      }
+    `,
+    { id: threadId },
+  );
 }
 
 /**
@@ -101,7 +116,8 @@ export async function adoptBatchHead(db: Db, pr: Pr, sha: string, path: string):
   return reopened;
 }
 
-const gone = (e: unknown) => e instanceof GithubError && (e.status === 404 || e.status === 422 || /NOT_FOUND|Could not resolve/i.test(e.message));
+const gone = (e: unknown) =>
+  e instanceof GithubError && (e.status === 404 || e.status === 422 || /NOT_FOUND|Could not resolve/i.test(e.message));
 
 /**
  * Closes a complete batch on one of my PRs: re-checks GitHub, rebases, pushes once with
@@ -111,7 +127,14 @@ export async function closeBatch(ctx: { db: Db; pr: Pr; ingest: (pr: Pr) => Prom
   const { db } = ctx;
   let pr = ctx.pr;
   if (await ctx.ingest(pr)) return; // new activity joins the batch
-  if (batchStatus(db.comments(pr.id), db.questions(pr.id), db.workItems(pr.id).filter((w) => w.kind !== 'close_batch')) !== 'closable') return;
+  if (
+    batchStatus(
+      db.comments(pr.id),
+      db.questions(pr.id),
+      db.workItems(pr.id).filter((w) => w.kind !== 'close_batch'),
+    ) !== 'closable'
+  )
+    return;
   const path = pr.worktree;
   if (!path) throw new Error('No worktree for this PR.');
   try {
@@ -128,12 +151,18 @@ export async function closeBatch(ctx: { db: Db; pr: Pr; ingest: (pr: Pr) => Prom
     if (!(await rebaseOntoBase(pr, path))) {
       const head = await git(path, ['rev-parse', 'HEAD']);
       const base = await git(path, ['rev-parse', `refs/remotes/origin/${pr.base_ref}`]);
-      if (!addConflict(db, pr, head, base, true)) ctx.block(`Rebasing onto ${pr.base_ref} fails again at the same commits. Resolve it in ${path}, then press Retry.`);
+      if (!addConflict(db, pr, head, base, true))
+        ctx.block(`Rebasing onto ${pr.base_ref} fails again at the same commits. Resolve it in ${path}, then press Retry.`);
       return;
     }
     const newSha = await push(pr, path, pr.batch_head_sha ?? pr.head_sha);
     const ciFixed = db.comments(pr.id).some((c) => c.kind === 'ci' && c.state === 'fixed');
-    db.update('prs', pr.id, { batch_head_sha: newSha, head_sha: newSha, dirty_by_agent: 0, ci_attempts: pr.ci_attempts + (ciFixed ? 1 : 0) });
+    db.update('prs', pr.id, {
+      batch_head_sha: newSha,
+      head_sha: newSha,
+      dirty_by_agent: 0,
+      ci_attempts: pr.ci_attempts + (ciFixed ? 1 : 0),
+    });
     pr = db.pr(pr.id)!;
   }
 
@@ -200,7 +229,14 @@ export function submitDecisions(db: Db, pr: Pr, input: SubmitInput) {
 
 /** Free-text instruction from the PR page; it becomes work for the session. */
 export function addInstruction(db: Db, pr: Pr, text: string) {
-  db.insert('comments', { pr_id: pr.id, kind: 'instruction', gh_key: `instruction:${Date.now()}`, author: 'me', body: text, state: 'accepted' });
+  db.insert('comments', {
+    pr_id: pr.id,
+    kind: 'instruction',
+    gh_key: `instruction:${Date.now()}`,
+    author: 'me',
+    body: text,
+    state: 'accepted',
+  });
   db.update('prs', pr.id, { last_event_at: now(), ...(pr.role === 'own' && !pr.batch_head_sha ? { batch_head_sha: pr.head_sha } : {}) });
   db.enqueue(pr.id, 'answers');
   changed(pr.id);
@@ -221,7 +257,9 @@ export async function submitReview(db: Db, pr: Pr, input: ReviewInput) {
   const inline = kept.filter((f) => f.kind === 'finding' && f.in_diff);
   const outside = kept.filter((f) => f.kind === 'finding' && !f.in_diff);
   const replies = kept.filter((f) => f.kind === 'thread_reply');
-  const body = [input.body.trim(), ...outside.map((f) => `**[${f.path}:${f.line}](${findingUrl(pr, f)})**: ${f.body}`)].filter(Boolean).join('\n\n');
+  const body = [input.body.trim(), ...outside.map((f) => `**[${f.path}:${f.line}](${findingUrl(pr, f)})**: ${f.body}`)]
+    .filter(Boolean)
+    .join('\n\n');
   const commit = pr.review_draft_sha ?? pr.head_sha;
 
   if (inline.length || body || input.verdict !== 'COMMENT') {

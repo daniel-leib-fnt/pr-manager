@@ -10,7 +10,11 @@ export class Blocked extends Error {}
 
 export const git = async (cwd: string, args: string[]) => (await run('git', args, { cwd })).trim();
 
-const gitOk = (cwd: string, args: string[]) => git(cwd, args).then(() => true, () => false);
+const gitOk = (cwd: string, args: string[]) =>
+  git(cwd, args).then(
+    () => true,
+    () => false,
+  );
 
 const locks = new Map<string, Promise<unknown>>();
 
@@ -20,7 +24,10 @@ const locks = new Map<string, Promise<unknown>>();
  */
 function serial<T>(key: string, fn: () => Promise<T>): Promise<T> {
   const next = (locks.get(key) ?? Promise.resolve()).then(fn, fn);
-  locks.set(key, next.catch(() => undefined));
+  locks.set(
+    key,
+    next.catch(() => undefined),
+  );
   return next;
 }
 
@@ -139,7 +146,9 @@ export async function sync(pr: Pr, path: string): Promise<string | undefined> {
     const branch = pr.is_cross_repo ? remoteHeadRef(pr) : `origin/${pr.head_ref}`;
     const moved = `The branch was pushed to (${remote.slice(0, 8)}) while the batch from ${start.slice(0, 8)} was open`;
     if (await isDirty(path)) {
-      throw new Blocked(`${moved}, and ${path} holds uncommitted agent changes. Commit them on top of ${branch} or discard them there, then press Retry.`);
+      throw new Blocked(
+        `${moved}, and ${path} holds uncommitted agent changes. Commit them on top of ${branch} or discard them there, then press Retry.`,
+      );
     }
     // No agent commits beyond the batch start, or only some that the new head already contains: take the new head.
     if (head === start || (await isAncestor(path, head, remote))) {
@@ -178,7 +187,12 @@ export async function localChanged(pr: Pr, path: string): Promise<boolean> {
 }
 
 export async function push(pr: Pr, path: string, expectedSha: string): Promise<string> {
-  await gitNet(pr.repo, path, ['push', `--force-with-lease=refs/heads/${pr.head_ref}:${expectedSha}`, httpsUrl(pr.repo), `HEAD:refs/heads/${pr.head_ref}`]);
+  await gitNet(pr.repo, path, [
+    'push',
+    `--force-with-lease=refs/heads/${pr.head_ref}:${expectedSha}`,
+    httpsUrl(pr.repo),
+    `HEAD:refs/heads/${pr.head_ref}`,
+  ]);
   await git(path, ['update-ref', remoteHeadRef(pr), 'HEAD']);
   return git(path, ['rev-parse', 'HEAD']);
 }
@@ -223,7 +237,12 @@ export async function removeWorktree(pr: Pr, ownSessionIds: Set<string>) {
   // A review worktree holds no work of mine; commits missing upstream are the author's, from before a force push.
   if (pr.role === 'own') {
     if (!(await gitOk(clone, ['cat-file', '-e', `${pr.head_sha}^{commit}`]))) {
-      await gitNet(pr.repo, clone, ['fetch', '--no-tags', httpsUrl(pr.repo), `+refs/pull/${pr.number}/head:refs/remotes/origin/pr/${pr.number}`]);
+      await gitNet(pr.repo, clone, [
+        'fetch',
+        '--no-tags',
+        httpsUrl(pr.repo),
+        `+refs/pull/${pr.number}/head:refs/remotes/origin/pr/${pr.number}`,
+      ]);
     }
     const head = await git(path, ['rev-parse', 'HEAD']);
     if (head !== pr.head_sha && !(await isAncestor(path, head, pr.head_sha))) {

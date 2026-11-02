@@ -5,7 +5,17 @@ import { openDb } from '../server/db.ts';
 
 test('one open conflict per PR from the poll, a new one for every failed rebase at batch close', () => {
   const db = openDb(':memory:');
-  const id = db.insert('prs', { url: 'u', repo: 'o/r', number: 1, title: 't', author: 'me', role: 'own', head_ref: 'h', head_sha: 'a1', base_ref: 'main' });
+  const id = db.insert('prs', {
+    url: 'u',
+    repo: 'o/r',
+    number: 1,
+    title: 't',
+    author: 'me',
+    role: 'own',
+    head_ref: 'h',
+    head_sha: 'a1',
+    base_ref: 'main',
+  });
   const pr = db.pr(id)!;
   assert.equal(addConflict(db, pr, 'a1', 'b1'), true);
   assert.equal(db.pr(id)!.batch_head_sha, 'a1');

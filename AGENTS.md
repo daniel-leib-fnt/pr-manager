@@ -17,12 +17,13 @@ All commands need the dev shell (Node 22, claude-code). Prefix with `nix develop
 | Test (one file) | `node --disable-warning=ExperimentalWarning --test test/batch.test.ts` | ~1s |
 | Typecheck web | `cd web && npx tsc --noEmit -p tsconfig.app.json` | ~10s |
 | Build web | `cd web && npx ng build` | ~30s |
-| Format web | `cd web && npx prettier --write src` | ~5s |
+| Format (whole repo) | `npm run format` (Prettier from the root `package.json`; config in `.prettierrc.json`) | ~5s |
+| Check formatting | `npm run format:check` | ~5s |
 | Run daemon | `npm start` (port 8020, serves `web/dist`) | — |
 | Web dev server | `cd web && npx ng serve` (port 4200, proxies `/api`) | — |
 | Nix package | `nix build` | minutes |
 
-CI ([.github/workflows/check.yml](.github/workflows/check.yml)) runs `npm run check`, `npm test`, `prettier --check` on `web/src` and `nix build`, all through Nix, on push to `main` and on PRs. Before claiming done: `npm run check && npm test`, plus the web typecheck and format when `web/` changed.
+CI ([.github/workflows/check.yml](.github/workflows/check.yml)) runs `npm run check`, `npm test`, `npm run format:check` (Prettier over the whole repository) and `nix build`, all through Nix, on push to `main` and on PRs. Before claiming done: `npm run check && npm test`, `npm run format`, plus the web typecheck when `web/` changed.
 
 ## File map
 

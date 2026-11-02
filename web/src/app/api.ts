@@ -2,16 +2,7 @@ import { HttpClient } from '@angular/common/http';
 import { Injectable, inject, signal } from '@angular/core';
 import { Observable, Subject, firstValueFrom } from 'rxjs';
 
-export type Group =
-  | 'ready'
-  | 'needs_me'
-  | 'working'
-  | 'queued'
-  | 'blocked'
-  | 'out_of_date'
-  | 'waiting'
-  | 'ignored'
-  | 'closed';
+export type Group = 'ready' | 'needs_me' | 'working' | 'queued' | 'blocked' | 'out_of_date' | 'waiting' | 'ignored' | 'closed';
 
 export interface Pr {
   id: number;
@@ -185,11 +176,7 @@ export class Api {
   }
 
   settings() {
-    return firstValueFrom(
-      this.http.get<{ settings: Setting[]; nixOnly: NixOnly[]; denied: DeniedCall[] }>(
-        '/api/settings',
-      ),
-    );
+    return firstValueFrom(this.http.get<{ settings: Setting[]; nixOnly: NixOnly[]; denied: DeniedCall[] }>('/api/settings'));
   }
 
   saveSettings(values: Record<string, unknown>) {

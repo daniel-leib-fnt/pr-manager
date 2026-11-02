@@ -11,7 +11,9 @@
     "start": "node --disable-warning=ExperimentalWarning server/main.ts",
     "check": "tsc --noEmit",
     "test": "node --disable-warning=ExperimentalWarning --test 'test/**/*.test.ts'",
-    "lock:strip": "node scripts/strip-lock.mjs"
+    "lock:strip": "node scripts/strip-lock.mjs",
+    "format": "prettier --write .",
+    "format:check": "prettier --check ."
   },
   "engines": {
     "node": ">=22.18"
@@ -22,6 +24,7 @@
   },
   "devDependencies": {
     "@types/node": "22.20.5",
+    "prettier": "3.9.10",
     "typescript": "5.9.3"
   }
 }

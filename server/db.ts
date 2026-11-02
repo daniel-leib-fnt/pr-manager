@@ -109,13 +109,7 @@ export interface Finding {
   created_at: string;
 }
 
-export type WorkKind =
-  | 'summarize'
-  | 'comments'
-  | 'answers'
-  | 'review'
-  | 'followup_review'
-  | 'close_batch';
+export type WorkKind = 'summarize' | 'comments' | 'answers' | 'review' | 'followup_review' | 'close_batch';
 
 export interface WorkItem {
   id: number;
@@ -278,7 +272,8 @@ export function openDb(path = join(config.stateDir, 'pr-manager.db')) {
     prByUrl: (url: string) => get<Pr>('SELECT * FROM prs WHERE url = ?', url),
     prs: () => all<Pr>('SELECT * FROM prs ORDER BY repo, number'),
     /** Sessions pr-manager started; an interactive session is any other. */
-    ownSessionIds: () => new Set(all<{ session_id: string }>('SELECT session_id FROM prs WHERE session_id IS NOT NULL').map((r) => r.session_id)),
+    ownSessionIds: () =>
+      new Set(all<{ session_id: string }>('SELECT session_id FROM prs WHERE session_id IS NOT NULL').map((r) => r.session_id)),
     comments: (prId: number) => all<Comment>('SELECT * FROM comments WHERE pr_id = ? ORDER BY id', prId),
     comment: (id: number) => get<Comment>('SELECT * FROM comments WHERE id = ?', id),
     questions: (prId: number) => all<Question>('SELECT * FROM questions WHERE pr_id = ? ORDER BY id', prId),
@@ -291,7 +286,8 @@ export function openDb(path = join(config.stateDir, 'pr-manager.db')) {
       return insert('work_items', { pr_id: prId, kind, payload: payload === undefined ? null : JSON.stringify(payload) });
     },
     kvGet: (key: string) => get<{ value: string }>('SELECT value FROM kv WHERE key = ?', key)?.value,
-    kvSet: (key: string, value: string) => run('INSERT INTO kv (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value', key, value),
+    kvSet: (key: string, value: string) =>
+      run('INSERT INTO kv (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value', key, value),
     transaction: <T>(fn: () => T): T => {
       db.exec('BEGIN');
       try {

@@ -4,13 +4,53 @@ import { batchStatus, readyToClose, replyFor, shouldResolve } from '../server/ba
 import type { Comment, Pr, Question, WorkItem } from '../server/db.ts';
 
 const comment = (over: Partial<Comment>): Comment => ({
-  id: 1, pr_id: 1, kind: 'thread', gh_key: 'thread:x', thread_id: 'T1', reply_to_db_id: 5, last_seen_gh_id: null,
-  author: 'alice', body: 'please rename', path: 'a.kt', line: 3, url: null, state: 'new', proposal: null,
-  reply_draft: null, reply_edited: 0, skip_reason: null, auto: 0, note: null, task: null, task_source: null, clarify: 0, created_at: '', updated_at: '',
+  id: 1,
+  pr_id: 1,
+  kind: 'thread',
+  gh_key: 'thread:x',
+  thread_id: 'T1',
+  reply_to_db_id: 5,
+  last_seen_gh_id: null,
+  author: 'alice',
+  body: 'please rename',
+  path: 'a.kt',
+  line: 3,
+  url: null,
+  state: 'new',
+  proposal: null,
+  reply_draft: null,
+  reply_edited: 0,
+  skip_reason: null,
+  auto: 0,
+  note: null,
+  task: null,
+  task_source: null,
+  clarify: 0,
+  created_at: '',
+  updated_at: '',
   ...over,
 });
-const question = (state: Question['state']): Question => ({ id: 1, pr_id: 1, comment_id: null, question: 'q', options: null, answer: null, state, created_at: '' });
-const work = (kind: WorkItem['kind'], state: WorkItem['state']): WorkItem => ({ id: 1, pr_id: 1, kind, payload: null, state, error: null, created_at: '', started_at: null, finished_at: null });
+const question = (state: Question['state']): Question => ({
+  id: 1,
+  pr_id: 1,
+  comment_id: null,
+  question: 'q',
+  options: null,
+  answer: null,
+  state,
+  created_at: '',
+});
+const work = (kind: WorkItem['kind'], state: WorkItem['state']): WorkItem => ({
+  id: 1,
+  pr_id: 1,
+  kind,
+  payload: null,
+  state,
+  error: null,
+  created_at: '',
+  started_at: null,
+  finished_at: null,
+});
 const pr = (over: Partial<Pr> = {}): Pr => ({ role: 'own', state: 'open', paused: 0, blocked: null, last_event_at: null, ...over }) as Pr;
 
 test('no comments means no batch', () => {
@@ -27,7 +67,10 @@ test('open items keep the batch open', () => {
 });
 
 test('fixed or skipped comments make the batch closable', () => {
-  assert.equal(batchStatus([comment({ state: 'fixed' }), comment({ state: 'done' })], [question('sent')], [work('close_batch', 'queued')]), 'closable');
+  assert.equal(
+    batchStatus([comment({ state: 'fixed' }), comment({ state: 'done' })], [question('sent')], [work('close_batch', 'queued')]),
+    'closable',
+  );
   assert.equal(batchStatus([comment({ state: 'skipped' })], [], []), 'closable');
   assert.equal(batchStatus([comment({ state: 'done' }), comment({ state: 'gone' })], [], []), 'none');
 });

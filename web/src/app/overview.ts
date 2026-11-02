@@ -33,9 +33,7 @@ function loadCollapsed(): Set<Group> {
   imports: [RouterLink, RouterLinkActive, DatePipe],
   template: `
     <div class="toolbar">
-      <span class="muted"
-        >Last poll: {{ lastPoll() ? (lastPoll() | date: 'HH:mm:ss') : 'never' }}</span
-      >
+      <span class="muted">Last poll: {{ lastPoll() ? (lastPoll() | date: 'HH:mm:ss') : 'never' }}</span>
       <button (click)="poll()" [disabled]="polling()">
         {{ polling() ? 'Polling…' : 'Poll now' }}
       </button>
@@ -44,7 +42,8 @@ function loadCollapsed(): Set<Group> {
     @for (g of groups(); track g.key) {
       <section class="group">
         <h2 class="toggle" (click)="toggle(g.key)">
-          <span class="caret">{{ collapsed().has(g.key) ? '▸' : '▾' }}</span> {{ g.label }}
+          <span class="caret">{{ collapsed().has(g.key) ? '▸' : '▾' }}</span>
+          {{ g.label }}
           <span class="count">{{ g.prs.length }}</span>
         </h2>
         @if (!collapsed().has(g.key)) {
@@ -52,9 +51,7 @@ function loadCollapsed(): Set<Group> {
             @for (pr of g.prs; track pr.id) {
               <li>
                 <a [routerLink]="['/pr', pr.id]" routerLinkActive="active" class="pr-row">
-                  <span class="badge" [class]="pr.role">{{
-                    pr.role === 'own' ? 'mine' : 'review'
-                  }}</span>
+                  <span class="badge" [class]="pr.role">{{ pr.role === 'own' ? 'mine' : 'review' }}</span>
                   <span class="ref">{{ pr.repo }}#{{ pr.number }}</span>
                   <span class="title">{{ pr.title }}</span>
                   <span class="chips">
@@ -80,16 +77,12 @@ function loadCollapsed(): Set<Group> {
                       <span class="chip need">review draft</span>
                     }
                     @if (pr.batch === 'closable') {
-                      <span class="chip live" [title]="pr.counts.pending + ' item(s) to push'"
-                        >waiting for push</span
-                      >
+                      <span class="chip live" [title]="pr.counts.pending + ' item(s) to push'">waiting for push</span>
                     } @else if (pr.counts.pending) {
                       <span class="chip">{{ pr.counts.pending }} to push</span>
                     }
                     @if (pr.check_state) {
-                      <span class="chip" [class]="'ci-' + pr.check_state.toLowerCase()">{{
-                        pr.check_state.toLowerCase()
-                      }}</span>
+                      <span class="chip" [class]="'ci-' + pr.check_state.toLowerCase()">{{ pr.check_state.toLowerCase() }}</span>
                     }
                     @if (pr.state !== 'open') {
                       <span class="chip">{{ pr.state }}</span>

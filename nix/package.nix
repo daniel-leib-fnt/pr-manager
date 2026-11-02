@@ -10,7 +10,7 @@ let
       fileset = lib.fileset.difference ../web (lib.fileset.maybeMissing ../web/node_modules);
     };
     nodejs = nodejs_22;
-    npmDepsHash = "sha256-XJUn77ApIMoQ6VGX0gKrLVrVRD6CDwLn3irgRHUEJnQ=";
+    npmDepsHash = "sha256-zR28aNp9DNFaVWXsaPazw1uyx5xifFesB9Ja7r0DH+0=";
     buildPhase = ''
       runHook preBuild
       npx ng build
@@ -31,7 +31,7 @@ buildNpmPackage {
     fileset = lib.fileset.unions [ ../package.json ../package-lock.json ../server ../prompts ];
   };
   nodejs = nodejs_22;
-  npmDepsHash = "sha256-Oum/k7LM5abrHC/K5sruzNWOl9nz5yivvaO7CDV4DJg=";
+  npmDepsHash = "sha256-v5VWGzg2Xx7E9wCL4Mt4hfwCG2smF/48TQ7ble2/FSM=";
   npmInstallFlags = [ "--omit=dev" ];
   dontNpmBuild = true;
   nativeBuildInputs = [ makeWrapper ];

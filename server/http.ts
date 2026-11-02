@@ -21,7 +21,8 @@ function groupOf(db: Db, pr: Pr): Group {
   if (pr.agent_running) return 'working';
   const comments = db.comments(pr.id);
   const questions = db.questions(pr.id);
-  if (comments.some((c) => c.state === 'proposal') || questions.some((q) => q.state === 'open') || pr.review_state === 'draft') return 'needs_me';
+  if (comments.some((c) => c.state === 'proposal') || questions.some((q) => q.state === 'open') || pr.review_state === 'draft')
+    return 'needs_me';
   const work = db.workItems(pr.id);
   if (work.some((w) => w.state === 'queued' && runnable(pr, w.kind))) return 'queued';
   const batch = pr.role === 'own' ? batchStatus(comments, questions, work) : 'none';
@@ -131,7 +132,11 @@ export function createHttp({ db, poller, runner }: { db: Db; poller: Poller; run
       clearNotification(`cleanup:${pr.id}`);
       if (pr.state === 'merged' || pr.state === 'dropped') await poller.cleanup(db.pr(pr.id)!);
       // Failed work is retried after a manual unblock.
-      db.run(`UPDATE work_items SET state = 'queued', error = NULL WHERE pr_id = ? AND state = 'failed' AND id = (SELECT MAX(id) FROM work_items WHERE pr_id = ?)`, pr.id, pr.id);
+      db.run(
+        `UPDATE work_items SET state = 'queued', error = NULL WHERE pr_id = ? AND state = 'failed' AND id = (SELECT MAX(id) FROM work_items WHERE pr_id = ?)`,
+        pr.id,
+        pr.id,
+      );
       changed(pr.id);
       runner.wake();
     },

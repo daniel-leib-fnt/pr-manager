@@ -73,7 +73,10 @@ test('extra MCP servers are read from the Nix file and checked', async () => {
     return f;
   };
   assert.deepEqual(extraMcpServers(undefined), {});
-  const servers = { 'mcp-atlassian': { type: 'stdio', command: 'mcp-atlassian-keyring', env: { JIRA_URL: 'https://jira' } }, docs: { type: 'http', url: 'https://docs' } };
+  const servers = {
+    'mcp-atlassian': { type: 'stdio', command: 'mcp-atlassian-keyring', env: { JIRA_URL: 'https://jira' } },
+    docs: { type: 'http', url: 'https://docs' },
+  };
   assert.deepEqual(extraMcpServers(file(servers)), servers);
   assert.throws(() => extraMcpServers(file({ 'bad name': { command: 'x' } })));
   assert.throws(() => extraMcpServers(file({ empty: {} })));

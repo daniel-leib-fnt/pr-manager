@@ -84,7 +84,10 @@ export function createAgentTools(db: Db, prId: number, onBlocked: (reason: strin
             ...(c.kind === 'ci' ? { failedChecks: await ciLogs(c.note), autoFixAllowed: p.ci_attempts < setting('maxCiAttempts') } : {}),
           })),
         );
-        const answered = db.questions(prId).filter((q) => q.state === 'answered').map((q) => ({ question: q.question, answer: q.answer, commentId: q.comment_id }));
+        const answered = db
+          .questions(prId)
+          .filter((q) => q.state === 'answered')
+          .map((q) => ({ question: q.question, answer: q.answer, commentId: q.comment_id }));
         return ok(JSON.stringify({ ...base, openItems: items, answeredQuestions: answered }, null, 2));
       }
       const threads = d.reviewThreads.nodes.map((t) => ({
@@ -94,20 +97,35 @@ export function createAgentTools(db: Db, prId: number, onBlocked: (reason: strin
         line: t.line ?? t.originalLine,
         comments: t.comments.nodes.map((c) => ({ author: c.author?.login, at: c.createdAt, body: c.body })),
       }));
-      const instructions = db.comments(prId).filter((c) => c.kind === 'instruction' && c.state === 'accepted').map((c) => c.body);
+      const instructions = db
+        .comments(prId)
+        .filter((c) => c.kind === 'instruction' && c.state === 'accepted')
+        .map((c) => c.body);
       return ok(
         JSON.stringify(
-          { ...base, previousReview: p.reviewed_sha ? { commit: p.reviewed_sha, at: p.reviewed_at, changesSince: `git diff ${p.reviewed_sha}..HEAD` } : null, threads, instructions },
+          {
+            ...base,
+            previousReview: p.reviewed_sha
+              ? { commit: p.reviewed_sha, at: p.reviewed_at, changesSince: `git diff ${p.reviewed_sha}..HEAD` }
+              : null,
+            threads,
+            instructions,
+          },
           null,
           2,
         ),
       );
     }),
 
-    def('set_summary', 'Sets the PR summary shown on the dashboard: what changes and why, 3 to 6 sentences.', { summary: z.string() }, async ({ summary }) => {
-      db.update('prs', prId, { summary });
-      return touched(ok('Summary saved.'));
-    }),
+    def(
+      'set_summary',
+      'Sets the PR summary shown on the dashboard: what changes and why, 3 to 6 sentences.',
+      { summary: z.string() },
+      async ({ summary }) => {
+        db.update('prs', prId, { summary });
+        return touched(ok('Summary saved.'));
+      },
+    ),
 
     def(
       'mark_fixed',
@@ -120,7 +138,11 @@ export function createAgentTools(db: Db, prId: number, onBlocked: (reason: strin
         if (c.kind === 'ci' && c.state === 'new' && pr().ci_attempts >= setting('maxCiAttempts')) {
           return fail('Automatic CI fixes are exhausted for this PR. Undo your change and use propose instead.');
         }
-        db.update('comments', commentId, { state: 'fixed', auto: c.state === 'new' ? 1 : 0, reply_draft: c.reply_edited ? c.reply_draft : replyDraft });
+        db.update('comments', commentId, {
+          state: 'fixed',
+          auto: c.state === 'new' ? 1 : 0,
+          reply_draft: c.reply_edited ? c.reply_draft : replyDraft,
+        });
         return touched(ok(`Comment ${commentId} marked as fixed.`));
       },
     ),
@@ -144,7 +166,13 @@ export function createAgentTools(db: Db, prId: number, onBlocked: (reason: strin
       async ({ commentId, proposal, replyDraft, clarifying }) => {
         const c = ownComment(commentId);
         if (!c || (c.state !== 'new' && c.state !== 'accepted')) return fail(`Comment ${commentId} is not open.`);
-        db.update('comments', commentId, { state: 'proposal', proposal, reply_draft: replyDraft, reply_edited: 0, clarify: clarifying ? 1 : 0 });
+        db.update('comments', commentId, {
+          state: 'proposal',
+          proposal,
+          reply_draft: replyDraft,
+          reply_edited: 0,
+          clarify: clarifying ? 1 : 0,
+        });
         return touched(ok(`Proposal for comment ${commentId} saved. I will decide on the dashboard.`));
       },
     ),
@@ -189,7 +217,15 @@ export function createAgentTools(db: Db, prId: number, onBlocked: (reason: strin
       async ({ threadId, body }) => {
         const t = (await loadDetail()).reviewThreads.nodes.find((x) => x.id === threadId);
         if (!t || !t.comments.nodes[0]) return fail(`Unknown thread ${threadId}.`);
-        db.insert('findings', { pr_id: prId, kind: 'thread_reply', thread_id: threadId, reply_to_db_id: t.comments.nodes[0].databaseId, path: t.path, line: t.line ?? t.originalLine, body });
+        db.insert('findings', {
+          pr_id: prId,
+          kind: 'thread_reply',
+          thread_id: threadId,
+          reply_to_db_id: t.comments.nodes[0].databaseId,
+          path: t.path,
+          line: t.line ?? t.originalLine,
+          body,
+        });
         return touched(ok('Reply drafted.'));
       },
     ),

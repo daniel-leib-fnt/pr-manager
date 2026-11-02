@@ -46,7 +46,8 @@ export function createPoller({ db, dashboardUrl }: PollerDeps) {
       if (!isExcluded(gh.repository.nameWithOwner)) seen.set(gh.url, { gh, role: 'own', inReviewSearch: false });
     }
     for (const gh of await searchPrs(setting('reviewQuery'))) {
-      if (gh.author?.login !== me && !isExcluded(gh.repository.nameWithOwner)) seen.set(gh.url, { gh, role: 'review', inReviewSearch: true });
+      if (gh.author?.login !== me && !isExcluded(gh.repository.nameWithOwner))
+        seen.set(gh.url, { gh, role: 'review', inReviewSearch: true });
     }
     const missing = db
       .all<Pr>(`SELECT * FROM prs WHERE state = 'open' OR blocked IS NOT NULL`)
@@ -64,10 +65,12 @@ export function createPoller({ db, dashboardUrl }: PollerDeps) {
         console.error(`poll ${gh.url}:`, e);
       }
     }
-    for (const pr of db.all<Pr>(`SELECT * FROM prs WHERE ignored = 1 AND (worktree IS NOT NULL OR session_id IS NOT NULL)`)) await discard(pr);
+    for (const pr of db.all<Pr>(`SELECT * FROM prs WHERE ignored = 1 AND (worktree IS NOT NULL OR session_id IS NOT NULL)`))
+      await discard(pr);
     // Closed PRs leave the poll, so ones that closed before they could be cleaned up are swept here.
     if (setting('autoRemoveMergedWorktrees')) {
-      for (const pr of db.all<Pr>(`SELECT * FROM prs WHERE state != 'open' AND blocked IS NULL AND agent_running = 0`).filter(removable)) await cleanup(pr);
+      for (const pr of db.all<Pr>(`SELECT * FROM prs WHERE state != 'open' AND blocked IS NULL AND agent_running = 0`).filter(removable))
+        await cleanup(pr);
     }
     db.kvSet('lastPoll', now());
     checkBatches();
@@ -92,16 +95,29 @@ export function createPoller({ db, dashboardUrl }: PollerDeps) {
     };
     if (!pr) {
       if (state !== 'open') return;
-      const id = db.insert('prs', { url: gh.url, repo: gh.repository.nameWithOwner, number: gh.number, author: gh.author?.login ?? '', role, state, ...fields, gh_updated_at: '' });
+      const id = db.insert('prs', {
+        url: gh.url,
+        repo: gh.repository.nameWithOwner,
+        number: gh.number,
+        author: gh.author?.login ?? '',
+        role,
+        state,
+        ...fields,
+        gh_updated_at: '',
+      });
       pr = db.pr(id)!;
       if (role === 'own') db.enqueue(id, 'summarize');
     }
     const prev = pr;
     const isChanged =
-      prev.gh_updated_at !== gh.updatedAt || prev.head_sha !== gh.headRefOid || prev.check_state !== fields.check_state || prev.state !== state;
+      prev.gh_updated_at !== gh.updatedAt ||
+      prev.head_sha !== gh.headRefOid ||
+      prev.check_state !== fields.check_state ||
+      prev.state !== state;
 
     // A review request withdrawn or filtered out before I submitted a review: nothing left to do on this PR.
-    const newState: PrState = role === 'review' && state === 'open' && !inReviewSearch && prev.review_state !== 'submitted' ? 'dropped' : state;
+    const newState: PrState =
+      role === 'review' && state === 'open' && !inReviewSearch && prev.review_state !== 'submitted' ? 'dropped' : state;
     db.update('prs', pr.id, { ...fields, state: newState });
     pr = db.pr(pr.id)!;
 
@@ -116,7 +132,8 @@ export function createPoller({ db, dashboardUrl }: PollerDeps) {
       if (fields.check_state === 'SUCCESS' && pr.ci_attempts) db.update('prs', pr.id, { ci_attempts: 0 });
       const lostReady = !!prev.ready && !pr.ready;
       // The rollup can turn FAILURE while other checks still run; ingest then skips CI, and nothing else changes once they finish.
-      const ciUnseen = (pr.check_state === 'FAILURE' || pr.check_state === 'ERROR') && !db.comments(pr.id).some((c) => c.gh_key === `ci:${gh.headRefOid}`);
+      const ciUnseen =
+        (pr.check_state === 'FAILURE' || pr.check_state === 'ERROR') && !db.comments(pr.id).some((c) => c.gh_key === `ci:${gh.headRefOid}`);
       // Losing the ready state means something changed on GitHub: look at the PR again, even if its update time did not move.
       if (isChanged || lostReady || ciUnseen) await ingest(pr, me);
       // A moving base does not change the PR's update time, so conflicts are checked on every poll.
@@ -124,11 +141,18 @@ export function createPoller({ db, dashboardUrl }: PollerDeps) {
       if (prev.ready !== pr.ready) changed(pr.id);
     } else {
       const becameReady = prev.is_draft && !gh.isDraft;
-      if (!pr.ignored && !pr.is_draft && buildGreen(pr) && pr.review_state === 'none' && (becameReady || !db.workItems(pr.id).some((w) => w.kind === 'review'))) {
+      if (
+        !pr.ignored &&
+        !pr.is_draft &&
+        buildGreen(pr) &&
+        pr.review_state === 'none' &&
+        (becameReady || !db.workItems(pr.id).some((w) => w.kind === 'review'))
+      ) {
         db.enqueue(pr.id, 'review');
       }
       // GitHub drops a PR from review-requested once I reviewed it; showing up again is a re-request.
-      if (!pr.ignored && setting('autoFollowupOnReRequest') && pr.review_state === 'submitted' && inReviewSearch && !prev.in_review_search) db.enqueue(pr.id, 'followup_review', { reRequested: true });
+      if (!pr.ignored && setting('autoFollowupOnReRequest') && pr.review_state === 'submitted' && inReviewSearch && !prev.in_review_search)
+        db.enqueue(pr.id, 'followup_review', { reRequested: true });
       if (isChanged && pr.review_state === 'submitted') await checkReviewOutOfDate(pr, me);
     }
     if (isChanged) changed(pr.id);
@@ -144,14 +168,17 @@ export function createPoller({ db, dashboardUrl }: PollerDeps) {
     try {
       if (pr.worktree) await removeWorktree(pr, db.ownSessionIds());
       if (pr.session_id) {
-        await deleteSession(pr.session_id, pr.worktree ? { dir: pr.worktree } : undefined).catch((e) => console.error(`delete session of ${pr.url}:`, errorMessage(e)));
+        await deleteSession(pr.session_id, pr.worktree ? { dir: pr.worktree } : undefined).catch((e) =>
+          console.error(`delete session of ${pr.url}:`, errorMessage(e)),
+        );
       }
       db.run('DELETE FROM prs WHERE id = ?', pr.id);
       clearNotification(`cleanup:${pr.id}`);
     } catch (e) {
       const reason = `Cleanup blocked: ${errorMessage(e)}`;
       if (pr.blocked !== reason) db.update('prs', pr.id, { blocked: reason });
-      if (e instanceof Blocked) notify('blocked', `Cleanup blocked: ${pr.repo}#${pr.number}`, errorMessage(e), prUrl(pr), `cleanup:${pr.id}`);
+      if (e instanceof Blocked)
+        notify('blocked', `Cleanup blocked: ${pr.repo}#${pr.number}`, errorMessage(e), prUrl(pr), `cleanup:${pr.id}`);
       else throw e;
     }
     changed(pr.id);
@@ -168,14 +195,17 @@ export function createPoller({ db, dashboardUrl }: PollerDeps) {
       return;
     }
     if (pr.session_id) {
-      await deleteSession(pr.session_id, pr.worktree ? { dir: pr.worktree } : undefined).catch((e) => console.error(`delete session of ${pr.url}:`, errorMessage(e)));
+      await deleteSession(pr.session_id, pr.worktree ? { dir: pr.worktree } : undefined).catch((e) =>
+        console.error(`delete session of ${pr.url}:`, errorMessage(e)),
+      );
     }
     db.update('prs', pr.id, { worktree: null, session_id: null });
     clearNotification(`cleanup:${pr.id}`);
     changed(pr.id);
   }
 
-  const formatThread = (comments: GhComment[]) => comments.map((c) => `@${c.author?.login ?? 'ghost'} (${c.createdAt}):\n${c.body}`).join('\n\n---\n\n');
+  const formatThread = (comments: GhComment[]) =>
+    comments.map((c) => `@${c.author?.login ?? 'ghost'} (${c.createdAt}):\n${c.body}`).join('\n\n---\n\n');
 
   /** Turns new GitHub activity on one of my PRs into comment rows and a `comments` work item. */
   async function ingest(pr: Pr, me?: string, detail?: GhPrDetail): Promise<number> {
@@ -186,7 +216,15 @@ export function createPoller({ db, dashboardUrl }: PollerDeps) {
     let added = 0;
 
     const reopen = (c: Comment, body: string, lastSeen: string) => {
-      db.update('comments', c.id, { state: 'new', body, last_seen_gh_id: lastSeen, proposal: null, skip_reason: null, reply_edited: 0, note: null });
+      db.update('comments', c.id, {
+        state: 'new',
+        body,
+        last_seen_gh_id: lastSeen,
+        proposal: null,
+        skip_reason: null,
+        reply_edited: 0,
+        note: null,
+      });
       added++;
     };
 
@@ -242,10 +280,22 @@ export function createPoller({ db, dashboardUrl }: PollerDeps) {
     }
 
     // Each unchecked checklist line is an item of its own, whoever replied since; a checked box closes it.
-    const sources: { source: TaskSource; kind: 'thread' | 'issue_comment' | 'review_body'; c: GhComment; thread?: (typeof d.reviewThreads.nodes)[number] }[] = [
+    const sources: {
+      source: TaskSource;
+      kind: 'thread' | 'issue_comment' | 'review_body';
+      c: GhComment;
+      thread?: (typeof d.reviewThreads.nodes)[number];
+    }[] = [
       ...d.comments.nodes.map((c) => ({ source: { type: 'issue_comment' as const, id: c.databaseId }, kind: 'issue_comment' as const, c })),
       ...d.reviews.nodes.map((c) => ({ source: { type: 'review' as const, id: c.databaseId }, kind: 'review_body' as const, c })),
-      ...d.reviewThreads.nodes.flatMap((t) => t.comments.nodes.map((c) => ({ source: { type: 'review_comment' as const, id: c.databaseId }, kind: 'thread' as const, c, thread: t }))),
+      ...d.reviewThreads.nodes.flatMap((t) =>
+        t.comments.nodes.map((c) => ({
+          source: { type: 'review_comment' as const, id: c.databaseId },
+          kind: 'thread' as const,
+          c,
+          thread: t,
+        })),
+      ),
     ];
     for (const { source, kind, c, thread } of sources) {
       if (c.author?.login === me) continue;
@@ -254,7 +304,8 @@ export function createPoller({ db, dashboardUrl }: PollerDeps) {
       tasks.forEach((task, i) => {
         const row = existing.get(keys[i]);
         if (task.checked) {
-          if (row && (row.state === 'new' || row.state === 'proposal')) db.update('comments', row.id, { state: 'done', note: 'Checked on GitHub.' });
+          if (row && (row.state === 'new' || row.state === 'proposal'))
+            db.update('comments', row.id, { state: 'done', note: 'Checked on GitHub.' });
           return;
         }
         if (row || thread?.isResolved) return;
@@ -267,7 +318,9 @@ export function createPoller({ db, dashboardUrl }: PollerDeps) {
           url: c.url,
           task: task.text,
           task_source: JSON.stringify(source),
-          ...(thread ? { thread_id: thread.id, reply_to_db_id: c.databaseId, path: thread.path, line: thread.line ?? thread.originalLine } : {}),
+          ...(thread
+            ? { thread_id: thread.id, reply_to_db_id: c.databaseId, path: thread.path, line: thread.line ?? thread.originalLine }
+            : {}),
         });
         added++;
       });
@@ -329,7 +382,8 @@ export function createPoller({ db, dashboardUrl }: PollerDeps) {
         failures++;
         console.error('poll failed:', e);
         const retryable = e instanceof GithubError && e.retryable;
-        if (!retryable || failures >= 3) notify('error', 'pr-manager: GitHub error', errorMessage(e).slice(0, 300), dashboardUrl, 'poll-error');
+        if (!retryable || failures >= 3)
+          notify('error', 'pr-manager: GitHub error', errorMessage(e).slice(0, 300), dashboardUrl, 'poll-error');
       }
     })().finally(() => {
       running = undefined;

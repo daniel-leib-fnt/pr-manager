@@ -12,10 +12,18 @@ export function changed(prId: number) {
 
 export function run(cmd: string, args: string[], opts: { cwd?: string; env?: NodeJS.ProcessEnv; input?: string } = {}): Promise<string> {
   return new Promise((resolve, reject) => {
-    const child = execFile(cmd, args, { cwd: opts.cwd, env: opts.env ?? process.env, maxBuffer: 64 * 1024 * 1024 }, (err, stdout, stderr) => {
-      if (err) reject(new Error(`${cmd} ${args.join(' ')} failed (${err.code}): ${(stderr || err.message).trim().split('\n').slice(-5).join('\n')}`));
-      else resolve(stdout);
-    });
+    const child = execFile(
+      cmd,
+      args,
+      { cwd: opts.cwd, env: opts.env ?? process.env, maxBuffer: 64 * 1024 * 1024 },
+      (err, stdout, stderr) => {
+        if (err)
+          reject(
+            new Error(`${cmd} ${args.join(' ')} failed (${err.code}): ${(stderr || err.message).trim().split('\n').slice(-5).join('\n')}`),
+          );
+        else resolve(stdout);
+      },
+    );
     if (opts.input !== undefined) child.stdin?.end(opts.input);
   });
 }
@@ -33,7 +41,9 @@ export function notify(event: NotifyEvent, title: string, body: string, url: str
     notified.set(key, body);
   }
   try {
-    const child = spawn('notify-send', ['--app-name=pr-manager', '--action=open=Open', '--wait', title, body], { stdio: ['ignore', 'pipe', 'ignore'] });
+    const child = spawn('notify-send', ['--app-name=pr-manager', '--action=open=Open', '--wait', title, body], {
+      stdio: ['ignore', 'pipe', 'ignore'],
+    });
     child.stdout.on('data', (d: Buffer) => {
       if (d.toString().trim() === 'open') spawn('xdg-open', [url], { stdio: 'ignore', detached: true }).unref();
     });

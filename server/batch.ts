@@ -45,7 +45,9 @@ export function replyFor(c: Comment, viewer: string): string | null {
 }
 
 const settled = (c: Comment, mode: string) =>
-  !c.clarify && c.state === 'fixed' || c.state === 'done' || (mode === 'fixed_and_skipped_with_reason' && c.state === 'skipped' && !!c.skip_reason?.trim());
+  (!c.clarify && c.state === 'fixed') ||
+  c.state === 'done' ||
+  (mode === 'fixed_and_skipped_with_reason' && c.state === 'skipped' && !!c.skip_reason?.trim());
 
 /**
  * Threads resolved after the reply, as configured in resolveThreads. A thread with checklist lines is

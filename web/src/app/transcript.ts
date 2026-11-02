@@ -16,22 +16,13 @@ interface Entry {
 const shorten = (s: string, n: number) => (s.length > n ? `${s.slice(0, n)}…` : s);
 
 function toolTitle(name: string, input: Record<string, unknown>): string {
-  const hint =
-    input['command'] ??
-    input['file_path'] ??
-    input['pattern'] ??
-    input['path'] ??
-    input['commentId'] ??
-    '';
+  const hint = input['command'] ?? input['file_path'] ?? input['pattern'] ?? input['path'] ?? input['commentId'] ?? '';
   return `${name.replace(/^mcp__pr__/, 'pr.')} ${shorten(String(hint), 120)}`.trim();
 }
 
 function resultText(content: unknown): string {
   if (typeof content === 'string') return content;
-  if (Array.isArray(content))
-    return content
-      .map((c) => (c && typeof c === 'object' && 'text' in c ? String(c.text) : ''))
-      .join('\n');
+  if (Array.isArray(content)) return content.map((c) => (c && typeof c === 'object' && 'text' in c ? String(c.text) : '')).join('\n');
   return JSON.stringify(content);
 }
 
@@ -65,8 +56,7 @@ function toEntry(raw: unknown): Entry | null {
   if (typeof content === 'string') blocks.push({ kind: 'text', text: content });
   else if (Array.isArray(content)) {
     for (const b of content as Record<string, unknown>[]) {
-      if (b['type'] === 'text' && String(b['text']).trim())
-        blocks.push({ kind: 'text', text: String(b['text']) });
+      if (b['type'] === 'text' && String(b['text']).trim()) blocks.push({ kind: 'text', text: String(b['text']) });
       if (b['type'] === 'tool_use') {
         const input = (b['input'] ?? {}) as Record<string, unknown>;
         blocks.push({

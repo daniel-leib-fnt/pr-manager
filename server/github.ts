@@ -43,7 +43,11 @@ async function request(url: string, init: RequestInit): Promise<Response> {
     const text = await res.text();
     const rateLimited = res.status === 429 || (res.status === 403 && /rate limit/i.test(text));
     if (res.status === 401) cachedToken = undefined;
-    throw new GithubError(`GitHub ${init.method ?? 'GET'} ${url} returned ${res.status}: ${text.slice(0, 300)}`, res.status, res.status >= 500 || rateLimited);
+    throw new GithubError(
+      `GitHub ${init.method ?? 'GET'} ${url} returned ${res.status}: ${text.slice(0, 300)}`,
+      res.status,
+      res.status >= 500 || rateLimited,
+    );
   }
   return res;
 }
@@ -53,7 +57,11 @@ export async function graphql<T>(query: string, variables: Record<string, unknow
   const json = (await res.json()) as { data?: T; errors?: { message: string; type?: string }[] };
   if (json.errors?.length) {
     const msg = json.errors.map((e) => e.message).join('; ');
-    throw new GithubError(`GraphQL: ${msg}`, 200, json.errors.some((e) => e.type === 'RATE_LIMITED'));
+    throw new GithubError(
+      `GraphQL: ${msg}`,
+      200,
+      json.errors.some((e) => e.type === 'RATE_LIMITED'),
+    );
   }
   return json.data as T;
 }
@@ -226,7 +234,9 @@ export async function prDetail(repo: string, number: number): Promise<GhPrDetail
 
 export function failedChecks(detail: GhPrDetail): { pending: boolean; failed: GhCheck[] } {
   const contexts = detail.headCommit.nodes[0]?.commit.statusCheckRollup?.contexts.nodes ?? [];
-  const pending = contexts.some((c) => (c.__typename === 'CheckRun' ? c.status !== 'COMPLETED' : c.state === 'PENDING' || c.state === 'EXPECTED'));
+  const pending = contexts.some((c) =>
+    c.__typename === 'CheckRun' ? c.status !== 'COMPLETED' : c.state === 'PENDING' || c.state === 'EXPECTED',
+  );
   const failed = contexts.filter((c) =>
     c.__typename === 'CheckRun'
       ? ['FAILURE', 'TIMED_OUT', 'STARTUP_FAILURE', 'ACTION_REQUIRED'].includes(c.conclusion ?? '')
