@@ -100,8 +100,8 @@ export function createPoller({ db, dashboardUrl }: PollerDeps) {
     const isChanged =
       prev.gh_updated_at !== gh.updatedAt || prev.head_sha !== gh.headRefOid || prev.check_state !== fields.check_state || prev.state !== state;
 
-    // A review request withdrawn before I reviewed: nothing left to do on this PR.
-    const newState: PrState = role === 'review' && state === 'open' && !inReviewSearch && prev.review_state === 'none' ? 'dropped' : state;
+    // A review request withdrawn or filtered out before I submitted a review: nothing left to do on this PR.
+    const newState: PrState = role === 'review' && state === 'open' && !inReviewSearch && prev.review_state !== 'submitted' ? 'dropped' : state;
     db.update('prs', pr.id, { ...fields, state: newState });
     pr = db.pr(pr.id)!;
 
