@@ -75,7 +75,7 @@ export async function rest<T = unknown>(method: string, path: string, body?: unk
 
 const PR_FIELDS = `
   url number title isDraft state merged updatedAt
-  mergeStateStatus reviewDecision latestReviews(first: 20) { nodes { state } }
+  mergeStateStatus
   headRefName headRefOid baseRefName baseRefOid isCrossRepository
   author { login }
   repository { nameWithOwner }
@@ -99,22 +99,19 @@ export interface GhPr {
   repository: { nameWithOwner: string };
   commits: { nodes: { commit: { statusCheckRollup: { state: string } | null } }[] };
   mergeStateStatus: string;
-  reviewDecision: 'APPROVED' | 'CHANGES_REQUESTED' | 'REVIEW_REQUIRED' | null;
-  latestReviews: { nodes: { state: string }[] };
 }
 
+/** Merge states in which GitHub enables the merge button; UNSTABLE means only checks that are not required failed. */
+const MERGEABLE = new Set(['CLEAN', 'HAS_HOOKS', 'UNSTABLE']);
+
 /**
- * Whether GitHub would merge the PR right now with an approval: mergeable without conflicts, required
- * checks and rules satisfied. Without required reviews, one approval and no change request count.
- * null while GitHub is still computing the merge state.
+ * Whether GitHub allows merging the PR right now, by the repository's own rules (required reviews,
+ * checks, conflicts, branch protection). null while GitHub is still computing the merge state.
  */
 export function readyToMerge(pr: GhPr): boolean | null {
   if (pr.state !== 'OPEN' || pr.isDraft) return false;
   if (pr.mergeStateStatus === 'UNKNOWN') return null;
-  if (pr.mergeStateStatus !== 'CLEAN' && pr.mergeStateStatus !== 'HAS_HOOKS') return false;
-  if (pr.reviewDecision) return pr.reviewDecision === 'APPROVED';
-  const states = pr.latestReviews.nodes.map((r) => r.state);
-  return states.includes('APPROVED') && !states.includes('CHANGES_REQUESTED');
+  return MERGEABLE.has(pr.mergeStateStatus);
 }
 
 export function rollupState(pr: GhPr): string | null {

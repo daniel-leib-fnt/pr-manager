@@ -31,27 +31,11 @@ test('finding links point to the diff line, the file line, or the thread', () =>
   );
 });
 
-test('ready to merge needs a clean merge state and an approval', () => {
-  const gh = (over: Partial<GhPr>): GhPr =>
-    ({
-      state: 'OPEN',
-      isDraft: false,
-      mergeStateStatus: 'CLEAN',
-      reviewDecision: 'APPROVED',
-      latestReviews: { nodes: [] },
-      ...over,
-    }) as GhPr;
-  assert.equal(readyToMerge(gh({})), true);
-  assert.equal(readyToMerge(gh({ mergeStateStatus: 'HAS_HOOKS' })), true);
-  for (const s of ['BLOCKED', 'BEHIND', 'DIRTY', 'UNSTABLE', 'DRAFT']) assert.equal(readyToMerge(gh({ mergeStateStatus: s })), false, s);
+test('ready to merge follows only what GitHub allows', () => {
+  const gh = (over: Partial<GhPr>): GhPr => ({ state: 'OPEN', isDraft: false, mergeStateStatus: 'CLEAN', ...over }) as GhPr;
+  for (const s of ['CLEAN', 'HAS_HOOKS', 'UNSTABLE']) assert.equal(readyToMerge(gh({ mergeStateStatus: s })), true, s);
+  for (const s of ['BLOCKED', 'BEHIND', 'DIRTY', 'DRAFT']) assert.equal(readyToMerge(gh({ mergeStateStatus: s })), false, s);
   assert.equal(readyToMerge(gh({ mergeStateStatus: 'UNKNOWN' })), null);
-  assert.equal(readyToMerge(gh({ reviewDecision: 'REVIEW_REQUIRED' })), false);
   assert.equal(readyToMerge(gh({ isDraft: true })), false);
-  // No required reviews: one approval and no change request.
-  assert.equal(readyToMerge(gh({ reviewDecision: null, latestReviews: { nodes: [{ state: 'APPROVED' }] } })), true);
-  assert.equal(readyToMerge(gh({ reviewDecision: null, latestReviews: { nodes: [{ state: 'COMMENTED' }] } })), false);
-  assert.equal(
-    readyToMerge(gh({ reviewDecision: null, latestReviews: { nodes: [{ state: 'APPROVED' }, { state: 'CHANGES_REQUESTED' }] } })),
-    false,
-  );
+  assert.equal(readyToMerge(gh({ state: 'MERGED' })), false);
 });
