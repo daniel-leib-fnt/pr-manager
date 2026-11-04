@@ -1,6 +1,6 @@
-import { batchStatus, replyFor, shouldResolve } from './batch.ts';
+import { batchStatus, replyFor, shouldResolve, withHeader } from './batch.ts';
 import { type TaskSource, checkTask, hasProse } from './checklist.ts';
-import { type Comment, type Db, type Pr, now } from './db.ts';
+import { type Comment, type Db, type Finding, type Pr, now } from './db.ts';
 import { Blocked, git, isDirty, localChanged, push, rebaseOntoBase, sync } from './git.ts';
 import { GithubError, findingUrl, graphql, rest, viewer } from './github.ts';
 import { changed } from './util.ts';
@@ -248,18 +248,37 @@ export interface ReviewInput {
   findings: { id: number; body: string; skip: boolean }[];
 }
 
+/**
+ * The texts of a review as posted. Every part the agent drafted and I left unchanged carries the reply header.
+ * The database still holds the agent's drafts at this point, so a different submitted text means I edited it.
+ */
+export function reviewTexts(pr: Pr, drafts: Finding[], input: ReviewInput, viewer: string) {
+  const edits = new Map(input.findings.map((f) => [f.id, f]));
+  const byAgent = (edited: string | undefined, draft: string | null) => edited === undefined || edited.trim() === (draft ?? '').trim();
+  const kept = drafts
+    .filter((f) => !edits.get(f.id)?.skip)
+    .map((f) => {
+      const edited = edits.get(f.id)?.body;
+      return { ...f, body: edited ?? f.body, byAgent: byAgent(edited, f.body) };
+    });
+  const posted = ({ byAgent, ...f }: (typeof kept)[number]) => ({ ...f, body: withHeader(f.body, viewer, byAgent) });
+  const outside = kept
+    .filter((f) => f.kind === 'finding' && !f.in_diff)
+    .map((f) => withHeader(`**[${f.path}:${f.line}](${findingUrl(pr, f)})**: ${f.body}`, viewer, f.byAgent));
+  const reviewBody = input.body.trim() ? withHeader(input.body.trim(), viewer, byAgent(input.body, pr.review_body)) : '';
+  return {
+    body: [reviewBody, ...outside].filter(Boolean).join('\n\n'),
+    inline: kept.filter((f) => f.kind === 'finding' && f.in_diff).map(posted),
+    replies: kept.filter((f) => f.kind === 'thread_reply').map(posted),
+  };
+}
+
 /** Posts the review draft as one GitHub review, then the drafted thread replies. */
 export async function submitReview(db: Db, pr: Pr, input: ReviewInput) {
   if (pr.review_state !== 'draft') throw new Error('There is no review draft to submit.');
   const edits = new Map(input.findings.map((f) => [f.id, f]));
   const all = db.findings(pr.id).filter((f) => f.state === 'draft');
-  const kept = all.filter((f) => !edits.get(f.id)?.skip).map((f) => ({ ...f, body: edits.get(f.id)?.body ?? f.body }));
-  const inline = kept.filter((f) => f.kind === 'finding' && f.in_diff);
-  const outside = kept.filter((f) => f.kind === 'finding' && !f.in_diff);
-  const replies = kept.filter((f) => f.kind === 'thread_reply');
-  const body = [input.body.trim(), ...outside.map((f) => `**[${f.path}:${f.line}](${findingUrl(pr, f)})**: ${f.body}`)]
-    .filter(Boolean)
-    .join('\n\n');
+  const { body, inline, replies } = reviewTexts(pr, all, input, await viewer());
   const commit = pr.review_draft_sha ?? pr.head_sha;
 
   if (inline.length || body || input.verdict !== 'COMMENT') {

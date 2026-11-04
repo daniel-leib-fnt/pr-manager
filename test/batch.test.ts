@@ -85,9 +85,14 @@ test('a closable batch waits for the quiet interval', () => {
   assert.equal(readyToClose(pr(), 'open', 0, t), false);
 });
 
-test('replies carry the header only when I never saw the text', () => {
+test('replies carry the header unless I edited the text', () => {
   assert.equal(replyFor(comment({ state: 'fixed', reply_draft: 'Renamed.', auto: 1 }), 'me'), '🤖 **Claude on behalf of @me**\n\nRenamed.');
-  assert.equal(replyFor(comment({ state: 'fixed', reply_draft: 'Renamed.', auto: 0 }), 'me'), 'Renamed.');
+  assert.equal(
+    replyFor(comment({ state: 'fixed', reply_draft: 'Renamed.', auto: 0 }), 'me'),
+    '🤖 **Claude on behalf of @me**\n\nRenamed.',
+    "an accepted proposal is still the agent's text",
+  );
+  assert.equal(replyFor(comment({ state: 'fixed', reply_draft: 'Renamed.', auto: 0, reply_edited: 1 }), 'me'), 'Renamed.');
   assert.equal(replyFor(comment({ state: 'skipped', skip_reason: 'Out of scope.' }), 'me'), 'Out of scope.');
   assert.equal(replyFor(comment({ state: 'skipped' }), 'me'), null);
   assert.equal(replyFor(comment({ state: 'fixed', kind: 'ci', reply_draft: 'x' }), 'me'), null);

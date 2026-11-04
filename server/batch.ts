@@ -39,9 +39,14 @@ export function replyFor(c: Comment, viewer: string): string | null {
   if (c.state === 'fixed') text = c.reply_draft?.trim() || null;
   if (c.state === 'skipped') text = c.skip_reason?.trim() || null;
   if (!text) return null;
-  // Text I never saw carries the header; anything I approved or edited is mine.
+  // A skip reason is typed by me; a fix reply is the agent's unless I edited it, even when I accepted the proposal.
+  return withHeader(text, viewer, c.state === 'fixed' ? !c.reply_edited : !!c.auto);
+}
+
+/** Puts the reply header above text the agent wrote and I did not edit; text I edited is mine and goes out as is. */
+export function withHeader(text: string, viewer: string, byAgent: boolean): string {
   const header = setting('replyHeader').replaceAll('{viewer}', viewer).trim();
-  return c.auto && header ? `${header}\n\n${text}` : text;
+  return byAgent && header ? `${header}\n\n${text}` : text;
 }
 
 const settled = (c: Comment, mode: string) =>

@@ -146,8 +146,8 @@ export const DEFS = {
   }),
   replyHeader: def({
     group: 'My PRs',
-    label: 'Header of automatic replies',
-    help: 'Put above replies I never saw. {viewer} becomes my login. Empty for none.',
+    label: 'Header of agent-written comments',
+    help: 'Put above every reply and review comment the agent wrote and I did not edit, including proposals I accepted unchanged. {viewer} becomes my login. Empty for none.',
     type: 'string',
     schema: z.string(),
     default: '🤖 **Claude on behalf of @{viewer}**',
