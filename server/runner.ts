@@ -149,7 +149,7 @@ export function createRunner({ db, poller, dashboardUrl }: RunnerDeps) {
       );
     if (kinds.has('answers'))
       parts.push(
-        'I answered on the dashboard. Call get_pr: implement accepted proposals and instructions, use my answers to continue with the open items.',
+        'I answered on the dashboard. Call get_pr: implement accepted proposals and instructions, write the replies for rejected and replied items, use my answers to continue with the open items.',
       );
     if (kinds.has('review'))
       parts.push('My review was requested. Call get_pr, review the full diff, and write the review draft as the workflow describes.');
@@ -265,10 +265,11 @@ export function createRunner({ db, poller, dashboardUrl }: RunnerDeps) {
       if (c.state === 'new')
         db.update('comments', c.id, {
           state: 'proposal',
-          proposal: c.proposal ?? 'The agent did not triage this item. Accept to let it handle the item as it sees fit, or skip it.',
+          proposal:
+            c.proposal ?? 'The agent did not triage this item. Accept to let it handle the item as it sees fit, or reject, reply or skip.',
         });
       if (c.state === 'accepted')
-        db.update('comments', c.id, { state: 'proposal', note: 'The agent did not finish this item; accept again to retry.' });
+        db.update('comments', c.id, { state: 'proposal', note: 'The agent did not finish this item; decide again to retry.' });
     }
     if (kinds.has('review') || kinds.has('followup_review')) {
       db.update('prs', pr.id, { review_state: 'draft' });

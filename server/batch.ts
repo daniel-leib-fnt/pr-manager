@@ -39,9 +39,9 @@ export function replyFor(c: Comment, viewer: string): string | null {
   if (c.state === 'fixed') text = c.reply_draft?.trim() || null;
   if (c.state === 'skipped') text = c.skip_reason?.trim() || null;
   if (!text) return null;
-  // Text I never saw carries the header; anything I approved or edited is mine.
+  // Only text I wrote myself goes out without the header.
   const header = setting('replyHeader').replaceAll('{viewer}', viewer).trim();
-  return c.auto && header ? `${header}\n\n${text}` : text;
+  return !c.reply_edited && header ? `${header}\n\n${text}` : text;
 }
 
 const settled = (c: Comment, mode: string) =>

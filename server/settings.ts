@@ -137,7 +137,7 @@ export const DEFS = {
     label: 'Resolve threads after replying',
     type: 'enum',
     options: [
-      { value: 'fixed_and_skipped_with_reason', label: 'Fixed, and skipped with a reason' },
+      { value: 'fixed_and_skipped_with_reason', label: 'Fixed and rejected' },
       { value: 'fixed', label: 'Fixed only' },
       { value: 'never', label: 'Never' },
     ],

@@ -8,7 +8,7 @@ Report results only through the `mcp__pr__*` tools. Prose in your final message 
 
 - `get_pr` gives you the PR, the open items with their `commentId`, and my answers.
 - `set_summary` keeps the dashboard summary current: what the PR changes and why, 3 to 6 sentences.
-- `mark_fixed`, `dismiss`, `propose` and `ask` settle comments on my own PRs.
+- `mark_fixed`, `reply`, `dismiss`, `propose` and `ask` settle comments on my own PRs.
 - `add_review_finding`, `set_review_verdict` and `draft_thread_reply` build a review draft on PRs I review.
 - `report_blocked` stops work on the PR until I intervene.
 
@@ -47,14 +47,20 @@ Triage every item with state `new`:
 
 {{SMALL_CHANGE_RUBRIC}}
 
-2. **Not small:** `propose` with a concrete description of the change and a reply draft. Do not change code for it yet.
-3. **Ambiguous for the reviewer:** several reasonable readings, missing context, or competing valid approaches. Do not guess and do not change code. `propose` with "No code change, clarifying reply" as the proposal and `clarifying: true`. The reply draft lays out the options and asks the reviewer which one they prefer. The thread stays unresolved.
+2. **Not small:** `propose` with a concrete description of the change. Do not change code for it yet.
+3. **Ambiguous for the reviewer:** several reasonable readings, missing context, or competing valid approaches. Do not guess and do not change code. `propose` with "No code change, clarifying reply" as the proposal, the options you would ask the reviewer to choose from, and `clarifying: true`.
 4. **Only I can decide**, for example a product or scope question: `ask` one precise question and link it to the item with `commentId`.
-5. **Answer only:** a question or objection that needs no code change. `propose` with "No code change, answer only" as the proposal and the answer as the reply draft.
+5. **Answer only:** a question or objection that needs no code change. `propose` with "No code change, answer only" as the proposal and the gist of the answer.
 6. **Already done:** the code already does what the item asks, for example because an earlier commit addressed it. `mark_fixed` without changing anything.
 7. **No action needed**, such as a bot status message or an approval without remarks: `dismiss`.
 
-Items with state `accepted` are proposals I approved or instructions I typed. Implement them, then call `mark_fixed`. If I edited a proposal, my version is the fix: apply it as written and do not fall back to your original proposal. If my version is too vague to turn into an edit, `ask` one targeted question before touching any files.
+Items I decided on carry my decision in `state`; `acceptedProposal` holds the proposal text as I left it, including notes on how to reply.
+
+- **Accepted** proposals and instructions I typed: implement them, then call `mark_fixed`. If I edited a proposal, my version is the fix: apply it as written and do not fall back to your original proposal. If my version is too vague to turn into an edit, `ask` one targeted question before touching any files.
+- **Rejected:** change no code. Call `reply` with a reply that declines the suggestion and says why. The thread is resolved.
+- **Reply:** change no code. Call `reply` with the answer or the clarifying question. The thread stays open.
+
+When an item carries `myReply`, I wrote the reply myself and the daemon posts it as is; still pass a short reply of your own, it is ignored.
 
 **Merge conflict items** (kind `conflict`): the PR does not rebase cleanly onto its base. Rebase onto the base ref named in the item with `git rebase`. Resolve conflicts that are mechanical, such as imports, neighboring edits or both sides adding entries, and keep the intent of both sides. Run the checks for the files you touched, then `mark_fixed` with an empty reply. The daemon pushes the rebased branch with the batch. If resolving a conflict needs a decision about behavior, run `git rebase --abort` and `propose` with what conflicts and the resolution you suggest.
 
@@ -68,6 +74,7 @@ Items with state `accepted` are proposals I approved or instructions I typed. Im
 
 - Write natural, plain English that does not sound generated. Keep it short and factual.
 - Name the specific change you made, or say why you made none.
+- Follow the notes on tone or content I left in the proposal.
 - Use an empty reply for CI items, instructions and merge conflicts.
 - Do not add a header or quote the comment. The daemon adds the header and quotes conversation comments when it posts.
 - **Checklist items:** when `checklistOnly` is true, use an empty reply. The checked box is the answer, and the diff shows the rest. That holds however much there would be to tell: which approach you took, what the fix touched, or that nothing needed to change. Write a reply only when the comment has prose around its checklist lines (`checklistOnly` false). The daemon then quotes just that line.

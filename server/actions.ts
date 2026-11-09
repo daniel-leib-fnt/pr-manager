@@ -189,27 +189,35 @@ export async function closeBatch(ctx: { db: Db; pr: Pr; ingest: (pr: Pr) => Prom
 }
 
 export interface SubmitInput {
-  comments?: { id: number; action: 'accept' | 'skip'; proposal?: string; replyDraft?: string; skipReason?: string }[];
+  comments?: { id: number; action: 'accept' | 'reject' | 'reply' | 'skip'; proposal?: string; replyDraft?: string }[];
   answers?: { id: number; answer: string }[];
 }
 
-/** My decisions on proposals and answers to questions, submitted at once like a review. */
+/**
+ * My decisions on proposals and answers to questions, submitted at once like a review. A reply I typed
+ * is posted as written; without one, the agent writes it, guided by the proposal text.
+ */
 export function submitDecisions(db: Db, pr: Pr, input: SubmitInput) {
   let needsAgent = false;
   db.transaction(() => {
     for (const d of input.comments ?? []) {
       const c = db.comment(d.id);
       if (!c || c.pr_id !== pr.id || c.state !== 'proposal') continue;
+      const reply = d.replyDraft?.trim() || null;
+      const base = { proposal: d.proposal ?? c.proposal, auto: 0, decision: d.action === 'skip' ? null : d.action };
       if (d.action === 'skip') {
-        db.update('comments', c.id, { state: 'skipped', skip_reason: d.skipReason?.trim() || null, auto: 0 });
+        db.update('comments', c.id, { ...base, state: 'skipped', skip_reason: null });
+      } else if (d.action === 'reject' && reply) {
+        db.update('comments', c.id, { ...base, state: 'skipped', skip_reason: reply, reply_edited: 1, clarify: 0 });
+      } else if (d.action === 'reply' && reply) {
+        db.update('comments', c.id, { ...base, state: 'fixed', reply_draft: reply, reply_edited: 1, clarify: 1 });
       } else {
-        const replyEdited = d.replyDraft !== undefined && d.replyDraft !== c.reply_draft;
         db.update('comments', c.id, {
+          ...base,
           state: 'accepted',
-          proposal: d.proposal ?? c.proposal,
-          reply_draft: d.replyDraft ?? c.reply_draft,
-          reply_edited: replyEdited || c.reply_edited ? 1 : 0,
-          auto: 0,
+          reply_draft: reply,
+          reply_edited: reply ? 1 : 0,
+          clarify: d.action === 'reply' ? 1 : 0,
         });
         needsAgent = true;
       }

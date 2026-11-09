@@ -9,6 +9,13 @@ import { changed, errorMessage } from './util.ts';
 const ok = (text: string) => ({ content: [{ type: 'text' as const, text }] });
 const fail = (text: string) => ({ content: [{ type: 'text' as const, text }], isError: true });
 
+/** What the agent has to do with an item I decided on. */
+const DECIDED = {
+  accept: 'accepted proposal: implement it',
+  reject: 'rejected: change no code, write the reply that declines it',
+  reply: 'reply: change no code, write the reply; the thread stays open',
+};
+
 const tail = (text: string, lines: number) => text.split('\n').slice(-lines).join('\n');
 
 export const AGENT_TOOL_SERVER = 'pr';
@@ -73,7 +80,7 @@ export function createAgentTools(db: Db, prId: number, onBlocked: (reason: strin
           open.map(async (c) => ({
             commentId: c.id,
             kind: c.kind,
-            state: c.state === 'accepted' ? 'accepted proposal: implement it' : 'new: triage it',
+            state: c.state === 'new' ? 'new: triage it' : DECIDED[c.decision ?? 'accept'],
             author: c.author,
             path: c.path,
             line: c.line,
@@ -81,6 +88,7 @@ export function createAgentTools(db: Db, prId: number, onBlocked: (reason: strin
             conversation: c.body,
             ...(c.task ? { checklistItem: c.task, checklistOnly: !hasProse(c.body) } : {}),
             ...(c.state === 'accepted' && c.proposal ? { acceptedProposal: c.proposal } : {}),
+            ...(c.state === 'accepted' && c.reply_edited ? { myReply: c.reply_draft } : {}),
             ...(c.kind === 'ci' ? { failedChecks: await ciLogs(c.note), autoFixAllowed: p.ci_attempts < setting('maxCiAttempts') } : {}),
           })),
         );
@@ -135,6 +143,8 @@ export function createAgentTools(db: Db, prId: number, onBlocked: (reason: strin
         const c = ownComment(commentId);
         if (!c) return fail(`Unknown comment ${commentId}.`);
         if (c.state !== 'new' && c.state !== 'accepted') return fail(`Comment ${commentId} is ${c.state}, not new or accepted.`);
+        if (c.state === 'accepted' && (c.decision === 'reject' || c.decision === 'reply'))
+          return fail(`I decided to ${c.decision} comment ${commentId}: change no code and use reply instead.`);
         if (c.kind === 'ci' && c.state === 'new' && pr().ci_attempts >= setting('maxCiAttempts')) {
           return fail('Automatic CI fixes are exhausted for this PR. Undo your change and use propose instead.');
         }
@@ -161,19 +171,38 @@ export function createAgentTools(db: Db, prId: number, onBlocked: (reason: strin
 
     def(
       'propose',
-      'Puts a comment up for my decision instead of fixing it: describe the change you propose and draft the reply. Do not change code for it yet. Set clarifying to true when the reply asks the reviewer to clarify; its thread then stays unresolved and its checklist box unchecked.',
-      { commentId: z.number(), proposal: z.string(), replyDraft: z.string(), clarifying: z.boolean().optional() },
-      async ({ commentId, proposal, replyDraft, clarifying }) => {
+      'Puts a comment up for my decision instead of fixing it: describe the change you propose, or for no code change what the reply would say. Do not change code for it yet and do not draft the reply; it is written after my decision. Set clarifying to true when you suggest a reply that asks the reviewer to clarify.',
+      { commentId: z.number(), proposal: z.string(), clarifying: z.boolean().optional() },
+      async ({ commentId, proposal, clarifying }) => {
         const c = ownComment(commentId);
         if (!c || (c.state !== 'new' && c.state !== 'accepted')) return fail(`Comment ${commentId} is not open.`);
         db.update('comments', commentId, {
           state: 'proposal',
           proposal,
-          reply_draft: replyDraft,
+          reply_draft: null,
           reply_edited: 0,
+          decision: null,
           clarify: clarifying ? 1 : 0,
         });
         return touched(ok(`Proposal for comment ${commentId} saved. I will decide on the dashboard.`));
+      },
+    ),
+
+    def(
+      'reply',
+      'Settles a comment I decided to reject or to reply to: no code change, only the reply posted when the batch is pushed. A rejected thread is resolved, a replied one stays open.',
+      { commentId: z.number(), reply: z.string() },
+      async ({ commentId, reply }) => {
+        const c = ownComment(commentId);
+        if (!c || c.state !== 'accepted' || (c.decision !== 'reject' && c.decision !== 'reply'))
+          return fail(`Comment ${commentId} is not one I decided to reject or reply to.`);
+        const text = c.reply_edited ? c.reply_draft : reply;
+        db.update(
+          'comments',
+          commentId,
+          c.decision === 'reject' ? { state: 'skipped', skip_reason: text } : { state: 'fixed', reply_draft: text, clarify: 1 },
+        );
+        return touched(ok(`Reply for comment ${commentId} saved.`));
       },
     ),
 

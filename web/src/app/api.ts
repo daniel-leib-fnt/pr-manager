@@ -51,6 +51,7 @@ export interface Comment {
   proposal: string | null;
   reply_draft: string | null;
   skip_reason: string | null;
+  decision: 'accept' | 'reject' | 'reply' | null;
   auto: number;
   note: string | null;
   /** The checklist line this item stands for; null for a whole comment. */

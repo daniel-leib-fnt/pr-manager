@@ -49,9 +49,9 @@ export interface Pr {
 }
 
 type CommentKind = 'thread' | 'issue_comment' | 'review_body' | 'ci' | 'instruction' | 'conflict';
-// new: not triaged yet; fixed: changed locally, waiting for push; proposal: waiting for me;
-// accepted: I accepted, agent has to implement; skipped: I skipped, reply pending;
-// done: finished; gone: deleted on GitHub.
+// new: not triaged yet; fixed: changed locally (or a reply that keeps the thread open), waiting for push;
+// proposal: waiting for me; accepted: I decided, agent has to implement or write the reply (see `decision`);
+// skipped: I skipped (no reason) or rejected (reason = reply), waiting for push; done: finished; gone: deleted on GitHub.
 type CommentState = 'new' | 'fixed' | 'proposal' | 'accepted' | 'skipped' | 'done' | 'gone';
 
 export interface Comment {
@@ -70,8 +70,11 @@ export interface Comment {
   state: CommentState;
   proposal: string | null;
   reply_draft: string | null;
+  /** 1 when I wrote the reply myself; any other reply carries the reply header. */
   reply_edited: number;
   skip_reason: string | null;
+  /** My decision on a proposal: accept implements it; reject and reply change no code, the agent only writes the reply. */
+  decision: 'accept' | 'reject' | 'reply' | null;
   auto: number;
   note: string | null;
   /** Text of the checklist line this item stands for; null for a whole comment. */
@@ -181,6 +184,7 @@ CREATE TABLE IF NOT EXISTS comments (
   reply_draft TEXT,
   reply_edited INTEGER NOT NULL DEFAULT 0,
   skip_reason TEXT,
+  decision TEXT,
   auto INTEGER NOT NULL DEFAULT 0,
   note TEXT,
   task TEXT,
@@ -238,7 +242,7 @@ export function openDb(path = join(config.stateDir, 'pr-manager.db')) {
   db.exec('PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;');
   db.exec(schema);
   // Columns added after the first release; CREATE TABLE IF NOT EXISTS does not add them.
-  const migrations: [string, string, string][] = [];
+  const migrations: [string, string, string][] = [['comments', 'decision', 'TEXT']];
   for (const [table, column, type] of migrations) {
     const cols = db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[];
     if (!cols.some((c) => c.name === column)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`);

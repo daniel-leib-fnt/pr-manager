@@ -222,6 +222,7 @@ export function createPoller({ db, dashboardUrl }: PollerDeps) {
         last_seen_gh_id: lastSeen,
         proposal: null,
         skip_reason: null,
+        decision: null,
         reply_edited: 0,
         note: null,
       });

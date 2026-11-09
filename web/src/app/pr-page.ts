@@ -5,10 +5,9 @@ import { Api, type Comment, type PrDetail, type Question } from './api';
 import { Transcript } from './transcript';
 
 interface Decision {
-  action: 'accept' | 'skip' | '';
+  action: 'accept' | 'reject' | 'reply' | 'skip' | '';
   proposal: string;
   replyDraft: string;
-  skipReason: string;
 }
 
 interface ReviewEdit {
@@ -160,7 +159,7 @@ function saveDraft(id: number, draft: Draft) {
                 <p class="task">☐ {{ c.task }}</p>
               }
               @if (c.clarify) {
-                <p class="muted">Clarifying reply: the thread stays unresolved and the box unchecked.</p>
+                <p class="muted">The agent suggests a clarifying reply: choose Reply to keep the thread open.</p>
               }
               <details>
                 <summary>Conversation</summary>
@@ -173,26 +172,27 @@ function saveDraft(id: number, draft: Draft) {
                 Proposal
                 <textarea rows="4" [(ngModel)]="decision(c).proposal" (ngModelChange)="persist()"></textarea>
               </label>
-              <label>
-                Reply
-                <textarea rows="3" [(ngModel)]="decision(c).replyDraft" (ngModelChange)="persist()"></textarea>
-              </label>
+              <details>
+                <summary>Reply (optional)</summary>
+                <textarea
+                  rows="3"
+                  placeholder="Empty: the agent writes the reply, following the proposal"
+                  [(ngModel)]="decision(c).replyDraft"
+                  (ngModelChange)="persist()"
+                ></textarea>
+              </details>
               <div class="choice">
-                <label>
-                  <input type="radio" [name]="'d' + c.id" value="accept" [(ngModel)]="decision(c).action" (ngModelChange)="persist()" />
-                  Accept
-                </label>
-                <label>
-                  <input type="radio" [name]="'d' + c.id" value="skip" [(ngModel)]="decision(c).action" (ngModelChange)="persist()" />
-                  Skip
-                </label>
-                @if (decision(c).action === 'skip') {
-                  <input
-                    class="grow"
-                    placeholder="Reason (optional, posted as reply)"
-                    [(ngModel)]="decision(c).skipReason"
-                    (ngModelChange)="persist()"
-                  />
+                @for (a of actions; track a.value) {
+                  <label [title]="a.help">
+                    <input
+                      type="radio"
+                      [name]="'d' + c.id"
+                      [value]="a.value"
+                      [(ngModel)]="decision(c).action"
+                      (ngModelChange)="persist()"
+                    />
+                    {{ a.label }}
+                  </label>
                 }
               </div>
             </div>
@@ -287,10 +287,10 @@ function saveDraft(id: number, draft: Draft) {
                 <details>
                   <summary>{{ headline(c) }}</summary>
                   <p class="pre">{{ c.body }}</p>
-                  @if (c.reply_draft) {
+                  @if (c.reply_draft || c.skip_reason) {
                     <p>
                       <strong>Reply:</strong>
-                      <span class="pre">{{ c.reply_draft }}</span>
+                      <span class="pre">{{ c.reply_draft || c.skip_reason }}</span>
                     </p>
                   }
                   @if (c.note) {
@@ -337,6 +337,12 @@ function saveDraft(id: number, draft: Draft) {
 export class PrPage {
   private readonly api = inject(Api);
   readonly id = input.required<string>();
+  protected readonly actions: { value: Decision['action']; label: string; help: string }[] = [
+    { value: 'accept', label: 'Accept', help: 'The agent implements the proposal; the thread is resolved.' },
+    { value: 'reject', label: 'Reject', help: 'No code change; a reply declines it and the thread is resolved.' },
+    { value: 'reply', label: 'Reply', help: 'No code change; a reply only, the thread stays open.' },
+    { value: 'skip', label: 'Skip', help: 'Nothing is posted and nothing is resolved.' },
+  ];
   protected readonly data = signal<PrDetail | null>(null);
   protected readonly draft = signal<Draft>(emptyDraft());
   protected readonly busy = signal(false);
@@ -387,8 +393,7 @@ export class PrPage {
     return (d.decisions[c.id] ??= {
       action: '',
       proposal: c.proposal ?? '',
-      replyDraft: c.reply_draft ?? '',
-      skipReason: '',
+      replyDraft: '',
     });
   }
 
@@ -414,6 +419,10 @@ export class PrPage {
 
   protected label(c: Comment): string {
     if (c.state === 'done' && c.note?.startsWith('Dismissed')) return 'dismissed';
+    if (c.state === 'accepted' && c.decision === 'reject') return 'rejected, agent writes the reply';
+    if (c.state === 'accepted' && c.decision === 'reply') return 'reply, agent writes it';
+    if (c.state === 'skipped' && c.skip_reason) return 'rejected, waiting for push';
+    if (c.state === 'fixed' && c.decision === 'reply') return 'reply, waiting for push';
     return STATE_LABEL[c.state];
   }
 

@@ -21,6 +21,7 @@ const comment = (over: Partial<Comment>): Comment => ({
   reply_draft: null,
   reply_edited: 0,
   skip_reason: null,
+  decision: null,
   auto: 0,
   note: null,
   task: null,
@@ -85,10 +86,14 @@ test('a closable batch waits for the quiet interval', () => {
   assert.equal(readyToClose(pr(), 'open', 0, t), false);
 });
 
-test('replies carry the header only when I never saw the text', () => {
-  assert.equal(replyFor(comment({ state: 'fixed', reply_draft: 'Renamed.', auto: 1 }), 'me'), '🤖 **Claude on behalf of @me**\n\nRenamed.');
-  assert.equal(replyFor(comment({ state: 'fixed', reply_draft: 'Renamed.', auto: 0 }), 'me'), 'Renamed.');
-  assert.equal(replyFor(comment({ state: 'skipped', skip_reason: 'Out of scope.' }), 'me'), 'Out of scope.');
+test('replies carry the header unless I wrote them myself', () => {
+  assert.equal(replyFor(comment({ state: 'fixed', reply_draft: 'Renamed.' }), 'me'), '🤖 **Claude on behalf of @me**\n\nRenamed.');
+  assert.equal(replyFor(comment({ state: 'fixed', reply_draft: 'Renamed.', reply_edited: 1 }), 'me'), 'Renamed.');
+  assert.equal(replyFor(comment({ state: 'skipped', skip_reason: 'Out of scope.', reply_edited: 1 }), 'me'), 'Out of scope.');
+  assert.equal(
+    replyFor(comment({ state: 'skipped', skip_reason: 'Out of scope.' }), 'me'),
+    '🤖 **Claude on behalf of @me**\n\nOut of scope.',
+  );
   assert.equal(replyFor(comment({ state: 'skipped' }), 'me'), null);
   assert.equal(replyFor(comment({ state: 'fixed', kind: 'ci', reply_draft: 'x' }), 'me'), null);
   assert.equal(replyFor(comment({ state: 'fixed', kind: 'instruction', reply_draft: 'x' }), 'me'), null);
