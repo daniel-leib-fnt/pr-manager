@@ -16,6 +16,7 @@ A local daemon with a dashboard for my GitHub pull requests: the ones I authored
   - An ignored review moves to the "Ignored" section and loses its worktree and agent session; when I stop ignoring it, both start afresh.
   - A follow-up review runs on demand, or automatically when my review is re-requested.
 - **Instructions:** on any PR page I can type a free-text instruction. It becomes an accepted item for the agent, and on my PRs it joins the open batch.
+- **Quick filters:** the PR list filters by role (all, mine, reviews), by "needs me", by failing CI, hides drafts, and searches title, repo, number and author. The filters are remembered per browser; the search is not.
 - **Notifications:** a desktop notification appears when I am needed: a proposal or question waits, a review draft is ready, a PR is blocked, or something failed.
 
 ## How it works

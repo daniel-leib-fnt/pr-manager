@@ -16,6 +16,42 @@ const GROUPS: { key: Group; label: string }[] = [
 ];
 
 const COLLAPSED_KEY = 'pr-manager:collapsed';
+const FILTERS_KEY = 'pr-manager:filters';
+
+interface Filters {
+  role: 'all' | 'own' | 'review';
+  needsMe: boolean;
+  hideDrafts: boolean;
+  ciFailing: boolean;
+}
+
+const NO_FILTERS: Filters = { role: 'all', needsMe: false, hideDrafts: false, ciFailing: false };
+
+const ROLES: { key: Filters['role']; label: string }[] = [
+  { key: 'all', label: 'All' },
+  { key: 'own', label: 'Mine' },
+  { key: 'review', label: 'Reviews' },
+];
+
+/** Quick filters are remembered per browser, like collapsed sections; the search text is not. */
+function loadFilters(): Filters {
+  try {
+    const raw = localStorage.getItem(FILTERS_KEY);
+    if (raw) return { ...NO_FILTERS, ...(JSON.parse(raw) as Partial<Filters>) };
+  } catch {
+    // storage unavailable
+  }
+  return NO_FILTERS;
+}
+
+function matches(pr: Pr, f: Filters, search: string): boolean {
+  if (f.role !== 'all' && pr.role !== f.role) return false;
+  if (f.needsMe && pr.group !== 'needs_me' && pr.group !== 'blocked') return false;
+  if (f.hideDrafts && pr.is_draft) return false;
+  if (f.ciFailing && pr.check_state !== 'FAILURE' && pr.check_state !== 'ERROR') return false;
+  if (!search) return true;
+  return [pr.title, pr.repo, `#${pr.number}`, pr.author].some((s) => s.toLowerCase().includes(search));
+}
 
 /** Collapsed sections are remembered per browser; Ignored starts collapsed. */
 function loadCollapsed(): Set<Group> {
@@ -37,6 +73,25 @@ function loadCollapsed(): Set<Group> {
       <button (click)="poll()" [disabled]="polling()">
         {{ polling() ? 'Polling…' : 'Poll now' }}
       </button>
+    </div>
+
+    <div class="filters">
+      <input
+        type="search"
+        placeholder="Search title, repo, #number, author"
+        [value]="search()"
+        (input)="search.set($any($event.target).value)"
+      />
+      <div class="filter-row">
+        <span class="segmented">
+          @for (r of roles; track r.key) {
+            <button [class.on]="filters().role === r.key" (click)="setFilter({ role: r.key })">{{ r.label }}</button>
+          }
+        </span>
+        <button [class.on]="filters().needsMe" (click)="setFilter({ needsMe: !filters().needsMe })">Needs me</button>
+        <button [class.on]="filters().hideDrafts" (click)="setFilter({ hideDrafts: !filters().hideDrafts })">Hide drafts</button>
+        <button [class.on]="filters().ciFailing" (click)="setFilter({ ciFailing: !filters().ciFailing })">CI failing</button>
+      </div>
     </div>
 
     @for (g of groups(); track g.key) {
@@ -100,6 +155,8 @@ function loadCollapsed(): Set<Group> {
     }
     @if (!prs().length) {
       <p class="muted">No pull requests yet. The first poll may still be running.</p>
+    } @else if (!groups().length) {
+      <p class="muted">No pull requests match the filters.</p>
     }
   `,
 })
@@ -109,15 +166,19 @@ export class Overview {
   protected readonly lastPoll = signal<string | null>(null);
   protected readonly polling = signal(false);
   protected readonly collapsed = signal(loadCollapsed());
-  protected readonly groups = computed(() =>
-    GROUPS.map((g) => ({
+  protected readonly roles = ROLES;
+  protected readonly filters = signal(loadFilters());
+  protected readonly search = signal('');
+  protected readonly groups = computed(() => {
+    const f = this.filters();
+    const search = this.search().trim().toLowerCase();
+    const shown = this.prs().filter((p) => matches(p, f, search));
+    return GROUPS.map((g) => ({
       ...g,
       // Most recently updated on GitHub first; ISO timestamps sort as strings.
-      prs: this.prs()
-        .filter((p) => p.group === g.key)
-        .sort((a, b) => b.gh_updated_at.localeCompare(a.gh_updated_at)),
-    })).filter((g) => g.prs.length),
-  );
+      prs: shown.filter((p) => p.group === g.key).sort((a, b) => b.gh_updated_at.localeCompare(a.gh_updated_at)),
+    })).filter((g) => g.prs.length);
+  });
 
   constructor() {
     effect(() => {
@@ -140,6 +201,15 @@ export class Overview {
       localStorage.setItem(COLLAPSED_KEY, JSON.stringify([...next]));
     } catch {
       // storage unavailable; the state just is not remembered
+    }
+  }
+
+  protected setFilter(change: Partial<Filters>) {
+    this.filters.set({ ...this.filters(), ...change });
+    try {
+      localStorage.setItem(FILTERS_KEY, JSON.stringify(this.filters()));
+    } catch {
+      // storage unavailable; the filters just are not remembered
     }
   }
 
