@@ -11,7 +11,8 @@ A local daemon with a dashboard for my GitHub pull requests: the ones I authored
   - Every unchecked checklist line (`- [ ] ...`) in a comment is an item of its own, and a box checked on GitHub closes it. When the batch closes, the daemon checks off fixed lines. A comment of nothing but checklist lines gets no reply, because the checked box is the answer.
   - When GitHub reports merge conflicts, the agent rebases onto the base branch and resolves mechanical conflicts; the batch then pushes the result. A conflict that needs a decision becomes a proposal.
   - As soon as GitHub allows merging a PR by the repository's own rules, and nothing is open in pr-manager, it moves to the top section "Ready to merge". If it loses that state, for example through a new review or a failed required check, the daemon reads it again right away.
-- **PRs I review:** the agent writes one review draft with findings and a suggested verdict. I edit and submit it.
+- **PRs I review:** the agent writes one review draft with findings and a suggested verdict. I edit and submit it, and can skip single findings or the review body.
+  - A review body is written only when the review guidelines ask for one. The default guidelines ask for it only when work spans several findings, listed as task lines.
   - New commits mark the review as out of date.
   - An ignored review moves to the "Ignored" section and loses its worktree and agent session; when I stop ignoring it, both start afresh.
   - A follow-up review runs on demand, or automatically when my review is re-requested.

@@ -231,7 +231,7 @@ export function createAgentTools(db: Db, prId: number, onBlocked: (reason: strin
 
     def(
       'set_review_verdict',
-      'Sets the suggested verdict and the review body text.',
+      'Sets the suggested verdict and the review body text. Pass an empty body unless my review guidelines ask for one.',
       { verdict: z.enum(['APPROVE', 'REQUEST_CHANGES', 'COMMENT']), body: z.string() },
       async ({ verdict, body }) => {
         db.update('prs', prId, { review_verdict: verdict, review_body: body });

@@ -21,6 +21,7 @@ interface Draft {
   findings: Record<number, ReviewEdit>;
   verdict: string;
   reviewBody: string;
+  skipReviewBody: boolean;
   instruction: string;
 }
 
@@ -30,6 +31,7 @@ const emptyDraft = (): Draft => ({
   findings: {},
   verdict: '',
   reviewBody: '',
+  skipReviewBody: false,
   instruction: '',
 });
 
@@ -251,10 +253,16 @@ function saveDraft(id: number, draft: Draft) {
               <option value="COMMENT">Comment</option>
             </select>
           </label>
-          <label>
-            Review body
-            <textarea rows="4" [(ngModel)]="draft().reviewBody" (ngModelChange)="persist()"></textarea>
-          </label>
+          <div class="item" [class.skipped]="draft().skipReviewBody">
+            <div class="item-head">
+              <span class="muted">Review body</span>
+              <label class="push-right">
+                <input type="checkbox" [(ngModel)]="draft().skipReviewBody" (ngModelChange)="persist()" />
+                Skip
+              </label>
+            </div>
+            <textarea rows="4" placeholder="Empty: no body" [(ngModel)]="draft().reviewBody" (ngModelChange)="persist()"></textarea>
+          </div>
           <button class="primary" (click)="submitReview()" [disabled]="busy()">Submit review</button>
         </section>
       }
@@ -479,12 +487,13 @@ export class PrPage {
     void this.run(async () => {
       await this.api.action(this.prId(), 'review', {
         verdict: d.verdict || 'COMMENT',
-        body: d.reviewBody,
+        body: d.skipReviewBody ? '' : d.reviewBody,
         findings,
       });
       d.findings = {};
       d.verdict = '';
       d.reviewBody = '';
+      d.skipReviewBody = false;
       this.persist();
     });
   }

@@ -19,6 +19,7 @@ Changing tests is fine.`;
 const DEFAULT_REVIEW_GUIDELINES = `- Read the PR description and the full diff. Run tests only when they help you judge a change.
 - Add one finding per real problem, anchored to a changed line.
 - Skip style nitpicks that a formatter or linter would catch.
+- Write a review body only when something needs work that spans several findings, such as a design change touching several places. List that work as task lines (\`* [ ] ...\`), at least one. Otherwise leave the body empty.
 - Use APPROVE when nothing blocks, REQUEST_CHANGES for real defects, and COMMENT otherwise.`;
 
 const NOTIFY_EVENTS = ['input', 'review_draft', 'blocked', 'error'] as const;

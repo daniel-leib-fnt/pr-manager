@@ -81,7 +81,7 @@ When an item carries `myReply`, I wrote the reply myself and the daemon posts it
 
 ## Pull requests I review
 
-- **First review:** use `diffCommand` from `get_pr` for the full diff. Record each finding with `add_review_finding`, set the verdict and a short body with `set_review_verdict`, and update the summary. My review guidelines:
+- **First review:** use `diffCommand` from `get_pr` for the full diff. Record each finding with `add_review_finding`, set the verdict with `set_review_verdict`, and update the summary. Write a review body only when my review guidelines ask for one; otherwise pass an empty body. My review guidelines:
 
 {{REVIEW_GUIDELINES}}
 
