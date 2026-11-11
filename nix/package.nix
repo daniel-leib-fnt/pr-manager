@@ -1,40 +1,58 @@
-{ lib, buildNpmPackage, nodejs_22, makeWrapper, claude-code }:
+{ lib, stdenvNoCC, fetchPnpmDeps, pnpmConfigHook, pnpm, nodejs_22, makeWrapper, claude-code }:
 
 let
-  # Angular UI, built separately because it has its own lockfile.
-  web = buildNpmPackage {
+  # The pnpm workspace files every build needs; each derivation adds its own sources.
+  workspace = [ ../package.json ../pnpm-lock.yaml ../pnpm-workspace.yaml ../web/package.json ];
+
+  # Angular UI.
+  web = stdenvNoCC.mkDerivation (finalAttrs: {
     pname = "pr-manager-web";
     version = "0.1.0";
     src = lib.fileset.toSource {
-      root = ../web;
-      fileset = lib.fileset.difference ../web (lib.fileset.maybeMissing ../web/node_modules);
+      root = ../.;
+      fileset = lib.fileset.unions (
+        workspace
+        ++ [
+          (lib.fileset.difference ../web (
+            lib.fileset.unions (map lib.fileset.maybeMissing [ ../web/node_modules ../web/.angular ../web/dist ])
+          ))
+        ]
+      );
     };
-    nodejs = nodejs_22;
-    npmDepsHash = "sha256-PyLqusSjmooQHcbKNYA1SHxmYHdV0JMtPy/9BqGhn3w=";
+    pnpmWorkspaces = [ "web" ];
+    pnpmDeps = fetchPnpmDeps {
+      inherit (finalAttrs) pname version src pnpmWorkspaces;
+      fetcherVersion = 4;
+      hash = "sha256-xgxx6DuXP7WOJ5YEx3Hp2EkdSTS924q5s+wpHBEL+MQ=";
+    };
+    nativeBuildInputs = [ nodejs_22 pnpm pnpmConfigHook ];
     buildPhase = ''
       runHook preBuild
-      npx ng build
+      pnpm --filter web exec ng build
       runHook postBuild
     '';
     installPhase = ''
       runHook preInstall
-      cp -r dist/web/browser $out
+      cp -r web/dist/web/browser $out
       runHook postInstall
     '';
-  };
+  });
 in
-buildNpmPackage {
+stdenvNoCC.mkDerivation (finalAttrs: {
   pname = "pr-manager";
   version = "0.1.0";
   src = lib.fileset.toSource {
     root = ../.;
-    fileset = lib.fileset.unions [ ../package.json ../package-lock.json ../server ../prompts ];
+    fileset = lib.fileset.unions (workspace ++ [ ../server ../prompts ]);
   };
-  nodejs = nodejs_22;
-  npmDepsHash = "sha256-v5VWGzg2Xx7E9wCL4Mt4hfwCG2smF/48TQ7ble2/FSM=";
-  npmInstallFlags = [ "--omit=dev" ];
-  dontNpmBuild = true;
-  nativeBuildInputs = [ makeWrapper ];
+  pnpmWorkspaces = [ "pr-manager" ];
+  pnpmInstallFlags = [ "--prod" ];
+  pnpmDeps = fetchPnpmDeps {
+    inherit (finalAttrs) pname version src pnpmWorkspaces pnpmInstallFlags;
+    fetcherVersion = 4;
+    hash = "sha256-vjHCvEXN5XizD9o13AmanL+sgeofDazPYVotDd7uEvY=";
+  };
+  nativeBuildInputs = [ nodejs_22 pnpm pnpmConfigHook makeWrapper ];
 
   # Node runs the TypeScript sources directly (type stripping), so there is nothing to compile.
   installPhase = ''
@@ -57,4 +75,4 @@ buildNpmPackage {
     mainProgram = "pr-manager";
     platforms = lib.platforms.linux;
   };
-}
+})

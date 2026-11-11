@@ -1,5 +1,5 @@
 <!-- FOR AI AGENTS - Human readability is a side effect, not a goal -->
-<!-- Last updated: 2026-10-29 | Last verified: 2026-10-29 -->
+<!-- Last updated: 2026-11-11 | Last verified: 2026-11-11 -->
 
 # AGENTS.md
 
@@ -7,23 +7,23 @@ pr-manager: a local daemon (Node, TypeScript without a build step) plus an Angul
 
 ## Commands
 
-All commands need the dev shell (Node 22, claude-code). Prefix with `nix develop -c` outside of it.
+All commands need the dev shell (Node 22, pnpm, claude-code). Prefix with `nix develop -c` outside of it.
 
 | Task | Command | ~Time |
 |------|---------|-------|
-| Install | `npm ci && (cd web && npm ci)` | ~30s |
-| Typecheck server + tests | `npm run check` | ~5s |
-| Test (all) | `npm test` | ~1s |
+| Install | `pnpm install` (one pnpm workspace: root + `web`; npm is refused) | ~15s |
+| Typecheck server + tests | `pnpm check` | ~5s |
+| Test (all) | `pnpm test` | ~1s |
 | Test (one file) | `node --disable-warning=ExperimentalWarning --test test/batch.test.ts` | ~1s |
-| Typecheck web | `cd web && npx tsc --noEmit -p tsconfig.app.json` | ~10s |
-| Build web | `cd web && npx ng build` | ~30s |
-| Format (whole repo) | `npm run format` (Prettier from the root `package.json`; config in `.prettierrc.json`) | ~5s |
-| Check formatting | `npm run format:check` | ~5s |
-| Run daemon | `npm start` (port 8020, serves `web/dist`) | — |
-| Web dev server | `cd web && npx ng serve` (port 4200, proxies `/api`) | — |
+| Typecheck web | `cd web && pnpm exec tsc --noEmit -p tsconfig.app.json` | ~10s |
+| Build web | `pnpm --filter web exec ng build` | ~30s |
+| Format (whole repo) | `pnpm format` (Prettier from the root `package.json`; config in `.prettierrc.json`) | ~5s |
+| Check formatting | `pnpm format:check` | ~5s |
+| Run daemon | `pnpm start` (port 8020, serves `web/dist`) | — |
+| Web dev server | `pnpm --filter web exec ng serve` (port 4200, proxies `/api`) | — |
 | Nix package | `nix build` | minutes |
 
-CI ([.github/workflows/check.yml](.github/workflows/check.yml)) runs `npm run check`, `npm test`, `npm run format:check` (Prettier over the whole repository) and `nix build`, all through Nix, on push to `main` and on PRs. Before claiming done: `npm run check && npm test`, `npm run format`, plus the web typecheck when `web/` changed.
+CI ([.github/workflows/check.yml](.github/workflows/check.yml)) runs `pnpm check`, `pnpm test`, `pnpm format:check` (Prettier over the whole repository) and `nix build`, all through Nix, on push to `main` and on PRs. Before claiming done: `pnpm check && pnpm test`, `pnpm format`, plus the web typecheck when `web/` changed.
 
 ## File map
 
@@ -67,7 +67,7 @@ State machines and their meaning are documented next to the types in `server/db.
 - **New setting:** add it to `DEFS` in `settings.ts`, add the key to the `settings` description in `nix/module.nix`, and mention it in the README configuration list.
 - **New DB column:** add it to the `CREATE TABLE`, to the `migrations` list in `openDb`, to the row interface in `db.ts`, and to `web/src/app/api.ts` if the UI reads it.
 - **Agent behavior:** change `prompts/workflow.md`, MCP tool descriptions in `agent-tools.ts`, or the per-run text in `runner.ts` `prompt()`. The prompt speaks as the user ("I", "my PRs").
-- **Dependencies:** ask first. The Agent SDK `0.3.N` must match `claude-code` `2.1.N` of the pinned nixpkgs. After `npm install`, run `npm run lock:strip`, then update both `npmDepsHash` values in `nix/package.nix`.
+- **Dependencies:** ask first. The Agent SDK `0.3.N` must match `claude-code` `2.1.N` of the pinned nixpkgs. Use pnpm only. `pnpm-workspace.yaml` holds the supply-chain rules (`minimumReleaseAge` of 7 days, install scripts only for `allowBuilds`); do not loosen them without asking. After changing dependencies, update both `fetchPnpmDeps` `hash` values in `nix/package.nix`.
 - **Tests:** pure functions only, `node:assert/strict`, `openDb(':memory:')` when a db is needed. No mocks of GitHub or the SDK.
 - **Style:** match surrounding code; short JSDoc that explains why, not what. US English everywhere.
 

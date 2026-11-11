@@ -14,8 +14,8 @@ jobs:
 
       # Prettier over the whole repository, from the root package's dev dependencies.
       - name: Typecheck, test and check the code style
-        run: nix develop -c bash -c 'npm ci && npm run check && npm test && npm run format:check'
+        run: nix develop -c bash -c 'pnpm install --frozen-lockfile && pnpm check && pnpm test && pnpm format:check'
 
-      # Builds the web app and the package, which also checks the npmDepsHash values.
+      # Builds the web app and the package, which also checks the fetchPnpmDeps hashes.
       - name: Build
         run: nix build -L

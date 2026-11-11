@@ -11,12 +11,12 @@
     "start": "node --disable-warning=ExperimentalWarning server/main.ts",
     "check": "tsc --noEmit",
     "test": "node --disable-warning=ExperimentalWarning --test 'test/**/*.test.ts'",
-    "lock:strip": "node scripts/strip-lock.mjs",
     "format": "prettier --write .",
     "format:check": "prettier --check ."
   },
   "engines": {
-    "node": ">=22.18"
+    "node": ">=22.18",
+    "npm": "nope, use pnpm"
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "0.3.303",

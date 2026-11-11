@@ -1,0 +1,22 @@
+packages:
+  - web
+
+# Supply-chain protection: no version younger than 7 days, and install
+# scripts only for the packages listed under allowBuilds.
+minimumReleaseAge: 10080
+
+strictDepBuilds: true
+
+allowBuilds:
+  '@parcel/watcher': true
+  esbuild: true
+  fsevents: true
+  lmdb: true
+  msgpackr-extract: true
+
+engineStrict: true
+
+# The SDK's bundled native Claude binaries: pr-manager runs the claude-code binary from Nix, and
+# fetchPnpmDeps would otherwise download all eight platforms.
+ignoredOptionalDependencies:
+  - '@anthropic-ai/claude-agent-sdk-*'

@@ -21,7 +21,7 @@
       homeManagerModules.default = import ./nix/module.nix self;
 
       devShells = forAll (pkgs: {
-        default = pkgs.mkShell { packages = [ pkgs.nodejs_22 pkgs.claude-code ]; };
+        default = pkgs.mkShell { packages = [ pkgs.nodejs_22 pkgs.pnpm pkgs.claude-code ]; };
       });
     };
 }

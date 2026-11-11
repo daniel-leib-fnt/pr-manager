@@ -79,7 +79,7 @@ function serveStatic(res: ServerResponse, urlPath: string) {
   if (!file.startsWith(root) || !existsSync(file) || statSync(file).isDirectory()) file = join(root, 'index.html');
   if (!existsSync(file)) {
     res.writeHead(404, { 'content-type': 'text/plain' });
-    res.end('Web UI not built. Run `npm run build` in web/.');
+    res.end('Web UI not built. Run `pnpm --filter web exec ng build`.');
     return;
   }
   res.writeHead(200, { 'content-type': MIME[extname(file)] ?? 'application/octet-stream' });

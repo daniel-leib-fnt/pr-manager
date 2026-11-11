@@ -98,14 +98,16 @@ The dashboard runs at <http://127.0.0.1:8020>. Logs go to `journalctl --user -u 
 
 ```sh
 nix develop
-npm ci && (cd web && npm ci)
-npm run check && npm test
-(cd web && npx ng build)
-npm start                   # daemon on :8020, serves web/dist
-(cd web && npx ng serve)    # UI dev server on :4200, proxies /api
+pnpm install                        # server and web, one pnpm workspace
+pnpm check && pnpm test
+pnpm --filter web exec ng build
+pnpm start                          # daemon on :8020, serves web/dist
+pnpm --filter web exec ng serve     # UI dev server on :4200, proxies /api
 ```
 
-The Agent SDK version must match the `claude-code` version of the pinned nixpkgs: SDK `0.3.N` belongs to `claude-code` `2.1.N`. After `npm install`, run `npm run lock:strip`. It removes the SDK's bundled native binaries from the lockfile, because the daemon uses the Nix `claude-code` and fetchNpmDeps would otherwise download them for every platform. Then update the `npmDepsHash` values in `nix/package.nix`.
+Dependencies are managed with pnpm only; npm refuses to install. `pnpm-workspace.yaml` protects against malicious package releases: pnpm installs no version younger than 7 days (`minimumReleaseAge`), and runs install scripts only for the packages listed under `allowBuilds` (`strictDepBuilds`). It also leaves out the SDK's bundled native binaries, because the daemon uses the Nix `claude-code` and fetchPnpmDeps would otherwise download them for every platform.
+
+The Agent SDK version must match the `claude-code` version of the pinned nixpkgs: SDK `0.3.N` belongs to `claude-code` `2.1.N`. After changing dependencies, update both `hash` values of `fetchPnpmDeps` in `nix/package.nix`.
 
 The server is TypeScript run directly by Node through type stripping, so there is no build step. Only erasable syntax is allowed.
 
