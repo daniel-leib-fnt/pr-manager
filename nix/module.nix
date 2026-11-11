@@ -89,8 +89,8 @@ in
         them until reset there. Keys: pollIntervalMinutes, pollDays (0 = Sunday), pollFromHour,
         pollToHour, ownQuery, reviewQuery, excludedRepos, reviewWaitForGreenBuild,
         autoFollowupOnReRequest, reviewGuidelines, smallChangeRubric, maxCiAttempts,
-        batchQuietMinutes, resolveThreads ("fixed_and_skipped_with_reason", "fixed", "never"),
-        replyHeader ({viewer} is replaced), autoRemoveMergedWorktrees, allowedTools,
+        ciIgnoredPendingChecks, batchQuietMinutes, resolveThreads ("fixed_and_skipped_with_reason",
+        "fixed", "never"), replyHeader ({viewer} is replaced), autoRemoveMergedWorktrees, allowedTools,
         maxParallelSessions, model, maxTurns, maxBudgetUsd, notify ("input", "review_draft",
         "blocked", "error"). Unknown keys and invalid values are logged and ignored.
       '';

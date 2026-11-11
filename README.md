@@ -43,7 +43,7 @@ Settings come in two kinds:
   - Polling: interval, active days and hours.
   - Scope: both search queries, excluded repositories.
   - Reviews: wait for a green build, automatic follow-up, review guidelines.
-  - My PRs: the small-change rubric, CI fix attempts, batch quiet time, thread resolving, reply header, auto-removal of merged worktrees.
+  - My PRs: the small-change rubric, CI fix attempts, checks that never finish (failed checks are fixed even while these still run; default `task-list-completed`), batch quiet time, thread resolving, reply header, auto-removal of merged worktrees.
   - Agent: allowed tools, parallel sessions, model, turn and budget limits.
   - Notifications: which events notify.
 

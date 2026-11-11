@@ -229,10 +229,13 @@ export async function prDetail(repo: string, number: number): Promise<GhPrDetail
   return data.repository.pullRequest;
 }
 
-export function failedChecks(detail: GhPrDetail): { pending: boolean; failed: GhCheck[] } {
+/** `ignoredPending` names checks that may run forever, such as a task-list check; they never hold back the failed ones. */
+export function failedChecks(detail: GhPrDetail, ignoredPending: string[]): { pending: boolean; failed: GhCheck[] } {
   const contexts = detail.headCommit.nodes[0]?.commit.statusCheckRollup?.contexts.nodes ?? [];
-  const pending = contexts.some((c) =>
-    c.__typename === 'CheckRun' ? c.status !== 'COMPLETED' : c.state === 'PENDING' || c.state === 'EXPECTED',
+  const pending = contexts.some(
+    (c) =>
+      !ignoredPending.includes(c.name ?? c.context ?? '') &&
+      (c.__typename === 'CheckRun' ? c.status !== 'COMPLETED' : c.state === 'PENDING' || c.state === 'EXPECTED'),
   );
   const failed = contexts.filter((c) =>
     c.__typename === 'CheckRun'

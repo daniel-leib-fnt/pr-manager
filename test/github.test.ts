@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { createHash } from 'node:crypto';
-import { type GhPr, commentableLines, findingUrl, readyToMerge } from '../server/github.ts';
+import { type GhPr, commentableLines, failedChecks, findingUrl, readyToMerge } from '../server/github.ts';
 
 test('commentable lines follow the right side of each hunk', () => {
   const patch = ['@@ -1,3 +1,4 @@', ' a', '-b', '+B', '+C', ' d', '@@ -10,2 +11,2 @@', ' x', '-y', '+Y'].join('\n');
@@ -38,4 +38,18 @@ test('ready to merge follows only what GitHub allows', () => {
   assert.equal(readyToMerge(gh({ mergeStateStatus: 'UNKNOWN' })), null);
   assert.equal(readyToMerge(gh({ isDraft: true })), false);
   assert.equal(readyToMerge(gh({ state: 'MERGED' })), false);
+});
+
+test('checks that never finish do not hold back failed ones, but still count when they fail', () => {
+  const detail = (...nodes: object[]) =>
+    ({ headCommit: { nodes: [{ commit: { oid: 'a', statusCheckRollup: { state: 'FAILURE', contexts: { nodes } } } }] } }) as never;
+  const build = { __typename: 'CheckRun', name: 'build', status: 'COMPLETED', conclusion: 'FAILURE' };
+  const taskList = { __typename: 'CheckRun', name: 'task-list-completed', status: 'IN_PROGRESS', conclusion: null };
+  const running = { __typename: 'CheckRun', name: 'test', status: 'IN_PROGRESS', conclusion: null };
+  const status = { __typename: 'StatusContext', context: 'task-list-completed', state: 'PENDING' };
+  assert.equal(failedChecks(detail(build, taskList), []).pending, true);
+  assert.deepEqual(failedChecks(detail(build, taskList, status), ['task-list-completed']), { pending: false, failed: [build] });
+  assert.equal(failedChecks(detail(build, taskList, running), ['task-list-completed']).pending, true);
+  const taskListFailed = { ...taskList, status: 'COMPLETED', conclusion: 'FAILURE' };
+  assert.deepEqual(failedChecks(detail(taskListFailed), ['task-list-completed']).failed, [taskListFailed]);
 });

@@ -327,7 +327,7 @@ export function createPoller({ db, dashboardUrl }: PollerDeps) {
       });
     }
 
-    const { pending, failed } = failedChecks(d);
+    const { pending, failed } = failedChecks(d, setting('ciIgnoredPendingChecks'));
     const headOid = d.headCommit.nodes[0]?.commit.oid ?? d.headRefOid;
     const ciKey = `ci:${headOid}`;
     if (!pending && failed.length && !existing.has(ciKey)) {

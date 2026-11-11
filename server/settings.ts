@@ -125,6 +125,14 @@ export const DEFS = {
     schema: z.number().int().min(0).max(10),
     default: 2,
   }),
+  ciIgnoredPendingChecks: def({
+    group: 'My PRs',
+    label: 'Checks that never finish',
+    help: 'One check name per line. Failed checks become CI work even while these are still running. Their failures still count.',
+    type: 'list',
+    schema: z.array(z.string().min(1)),
+    default: ['task-list-completed'],
+  }),
   batchQuietMinutes: def({
     group: 'My PRs',
     label: 'Batch quiet time (minutes)',
