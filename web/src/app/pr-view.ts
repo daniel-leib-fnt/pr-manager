@@ -34,8 +34,8 @@ export function nextStep(pr: Pr): string {
   ].filter(Boolean);
   if (todo.length) return todo.join(' · ');
   if (pr.waitingForBuild) return 'Review waits for a green build';
-  if (pr.group === 'queued')
-    return pr.batch === 'closable' ? `Push of ${plural(pr.counts.pending, 'change')} up next` : 'Queued for the agent';
+  if (pr.group === 'queued') return 'Queued for the agent';
+  if (pr.group === 'push') return `Push of ${plural(pr.counts.pending, 'change')} up next`;
   if (pr.group === 'ready') return 'Ready to merge';
   if (pr.group === 'out_of_date') return 'Review out of date';
   if (pr.role === 'review') return pr.review_state === 'submitted' ? 'Review submitted · waiting on the author' : 'Waiting for the review';

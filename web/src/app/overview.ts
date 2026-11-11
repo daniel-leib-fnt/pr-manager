@@ -10,6 +10,7 @@ const GROUPS: { key: Group; label: string }[] = [
   { key: 'blocked', label: 'Blocked' },
   { key: 'working', label: 'Agent working' },
   { key: 'queued', label: 'Queued' },
+  { key: 'push', label: 'Waiting for push' },
   { key: 'out_of_date', label: 'Review out of date' },
   { key: 'waiting', label: 'Waiting on others' },
   { key: 'ignored', label: 'Ignored' },

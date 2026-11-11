@@ -13,7 +13,7 @@ import type { Runner } from './runner.ts';
 import { deniedCalls, describeNixOnly, describeSettings, isExcluded, resetOverride, saveOverrides } from './settings.ts';
 import { bus, changed, clearNotification, errorMessage } from './util.ts';
 
-type Group = 'ready' | 'needs_me' | 'working' | 'queued' | 'blocked' | 'out_of_date' | 'waiting' | 'ignored' | 'closed';
+type Group = 'ready' | 'needs_me' | 'working' | 'queued' | 'push' | 'blocked' | 'out_of_date' | 'waiting' | 'ignored' | 'closed';
 
 function groupOf(db: Db, pr: Pr): Group {
   if (pr.state !== 'open') return pr.blocked ? 'blocked' : 'closed';
@@ -28,7 +28,7 @@ function groupOf(db: Db, pr: Pr): Group {
   if (work.some((w) => w.state === 'queued' && runnable(pr, w.kind))) return 'queued';
   const batch = pr.role === 'own' ? batchStatus(comments, questions, work) : 'none';
   // Fixes waiting out the quiet time or being pushed right now: the push is up next, not someone else.
-  if (batch === 'closable') return 'queued';
+  if (batch === 'closable') return 'push';
   if (pr.ready && batch === 'none') return 'ready';
   if (pr.review_out_of_date) return 'out_of_date';
   return 'waiting';

@@ -2,7 +2,7 @@ import { HttpClient } from '@angular/common/http';
 import { Injectable, inject, signal } from '@angular/core';
 import { Observable, Subject, firstValueFrom } from 'rxjs';
 
-export type Group = 'ready' | 'needs_me' | 'working' | 'queued' | 'blocked' | 'out_of_date' | 'waiting' | 'ignored' | 'closed';
+export type Group = 'ready' | 'needs_me' | 'working' | 'queued' | 'push' | 'blocked' | 'out_of_date' | 'waiting' | 'ignored' | 'closed';
 
 export interface Pr {
   id: number;
