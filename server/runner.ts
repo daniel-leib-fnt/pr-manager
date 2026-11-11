@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, realpathSync } from 'node:fs';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { type Options, type SDKResultMessage, query } from '@anthropic-ai/claude-agent-sdk';
 import { AGENT_TOOL_SERVER, createAgentTools } from './agent-tools.ts';
-import { adoptBatchHead, closeBatch } from './actions.ts';
+import { adoptBatchHead, applyPredecisions, closeBatch } from './actions.ts';
 import { runnable } from './batch.ts';
 import { config, extraMcpServers } from './config.ts';
 import { type Db, type Pr, type WorkItem, type WorkKind, now } from './db.ts';
@@ -149,7 +149,7 @@ export function createRunner({ db, poller, dashboardUrl }: RunnerDeps) {
       );
     if (kinds.has('answers'))
       parts.push(
-        'I answered on the dashboard. Call get_pr: implement accepted proposals and instructions, write the replies for rejected and replied items, use my answers to continue with the open items.',
+        'All decisions are made. Call get_pr: implement accepted proposals and instructions, write the replies for rejected and replied items, use my answers to continue with the open items.',
       );
     if (kinds.has('review'))
       parts.push('My review was requested. Call get_pr, review the full diff, and write the review draft as the workflow describes.');
@@ -269,8 +269,13 @@ export function createRunner({ db, poller, dashboardUrl }: RunnerDeps) {
             c.proposal ?? 'The agent did not triage this item. Accept to let it handle the item as it sees fit, or reject, reply or skip.',
         });
       if (c.state === 'accepted')
-        db.update('comments', c.id, { state: 'proposal', note: 'The agent did not finish this item; decide again to retry.' });
+        db.update('comments', c.id, {
+          state: 'proposal',
+          decision: null,
+          note: 'The agent did not finish this item; decide again to retry.',
+        });
     }
+    if (pr.role === 'own' && applyPredecisions(db, pr)) bus.emit('wake');
     if (kinds.has('review') || kinds.has('followup_review')) {
       db.update('prs', pr.id, { review_state: 'draft' });
       if (!pr.ignored) notify('review_draft', `Review draft ready: ${pr.repo}#${pr.number}`, pr.title, prUrl(pr));

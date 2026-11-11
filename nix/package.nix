@@ -10,7 +10,7 @@ let
       fileset = lib.fileset.difference ../web (lib.fileset.maybeMissing ../web/node_modules);
     };
     nodejs = nodejs_22;
-    npmDepsHash = "sha256-zR28aNp9DNFaVWXsaPazw1uyx5xifFesB9Ja7r0DH+0=";
+    npmDepsHash = "sha256-PyLqusSjmooQHcbKNYA1SHxmYHdV0JMtPy/9BqGhn3w=";
     buildPhase = ''
       runHook preBuild
       npx ng build

@@ -3,9 +3,9 @@
 A local daemon with a dashboard for my GitHub pull requests: the ones I authored and the ones where my review is requested. Every PR gets its own git worktree and one persistent ("sticky") Claude agent session, run through the Claude Agent SDK.
 
 - **My PRs:** review comments and failed CI runs become work items.
-  - Small, unambiguous fixes are applied without me.
-  - Anything bigger becomes an editable proposal on the dashboard, and open questions are asked there too.
-  - I decide on proposals and answer questions, then submit them all at once, like a GitHub review. Accept: the agent implements the proposal and the thread is resolved. Reject: no code change, a reply declines it and the thread is resolved. Reply: no code change, a reply only, and the thread stays open. Skip: nothing is posted.
+  - The agent triages every comment into a decision but changes no code yet. Small, unambiguous fixes, answers and clarifying replies it pre-decides itself; anything bigger becomes an editable proposal for me, and open questions are asked on the dashboard too.
+  - When nothing waits for me, the pre-decisions take effect right away and the agent applies them in one run. Otherwise the PR page lists every decision: open ones expanded, pre-decided ones folded with an "Agent" tag. I can change a pre-decision; the tag then disappears.
+  - I decide and answer, then submit all decisions at once, pre-decided ones included, like a GitHub review. Choosing a decision folds its card and moves to the next open one. Accept: the agent implements the proposal and the thread is resolved. Reject: no code change, a reply declines it and the thread is resolved. Reply: no code change, a reply only, and the thread stays open. Skip: nothing is posted.
   - The reply field of a proposal is optional. Text I type there is posted as is; left empty, the agent writes the reply after my decision, following the notes I leave in the proposal, and it carries the reply header.
   - When every item is fixed, rejected or skipped, the daemon rebases, pushes once with `--force-with-lease`, posts the replies and resolves the threads.
   - Every unchecked checklist line (`- [ ] ...`) in a comment is an item of its own, and a box checked on GitHub closes it. When the batch closes, the daemon checks off fixed lines. A comment of nothing but checklist lines gets no reply, because the checked box is the answer.
@@ -17,8 +17,9 @@ A local daemon with a dashboard for my GitHub pull requests: the ones I authored
   - An ignored review moves to the "Ignored" section and loses its worktree and agent session; when I stop ignoring it, both start afresh.
   - A follow-up review runs on demand, or automatically when my review is re-requested.
 - **Instructions:** on any PR page I can type a free-text instruction. It becomes an accepted item for the agent, and on my PRs it joins the open batch.
-- **Quick filters:** the PR list filters by role (all, mine, reviews), by "needs me", by failing CI, hides drafts, and searches title, repo, number and author. The filters are remembered per browser; the search is not.
-- **Notifications:** a desktop notification appears when I am needed: a proposal or question waits, a review draft is ready, a PR is blocked, or something failed.
+- **Dashboard:** one page with the PR list on the left and the selected PR on the right. Each list entry shows the build status the way GitHub does (green check, pulsing yellow dot, red cross) and one line on what happens next; every section folds. Comments and findings on a file line show the surrounding code from the worktree, highlighted with Shiki for Kotlin, TypeScript, JavaScript, JSON, XML, YAML, Java, AsciiDoc, Markdown, Nix and shell scripts. `J` and `K` move through the list, `/` focuses the search, and Ctrl+Enter sends an instruction.
+- **Quick filters:** the PR list filters by role (all, mine, reviews), by failing CI, hides drafts, and searches title, repo, number and author. The filters are remembered per browser; the search is not.
+- **Notifications:** a desktop notification appears when I am needed: a decision or question waits, a review draft is ready, a PR is blocked, or something failed.
 
 ## How it works
 

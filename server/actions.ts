@@ -189,38 +189,46 @@ export async function closeBatch(ctx: { db: Db; pr: Pr; ingest: (pr: Pr) => Prom
 }
 
 export interface SubmitInput {
-  comments?: { id: number; action: 'accept' | 'reject' | 'reply' | 'skip'; proposal?: string; replyDraft?: string }[];
+  comments?: { id: number; action: Action; proposal?: string; replyDraft?: string }[];
   answers?: { id: number; answer: string }[];
 }
 
+type Action = 'accept' | 'reject' | 'reply' | 'skip';
+
 /**
- * My decisions on proposals and answers to questions, submitted at once like a review. A reply I typed
- * is posted as written; without one, the agent writes it, guided by the proposal text.
+ * Settles one proposal. A reply I typed is posted as written; without one, the agent writes it, guided by the
+ * proposal text. Returns whether the agent has work to do for it.
  */
+function decide(db: Db, c: Comment, action: Action, proposal: string | null, replyDraft: string | null): boolean {
+  const reply = replyDraft?.trim() || null;
+  const base = { proposal, auto: 0, decision: action };
+  if (action === 'skip') {
+    db.update('comments', c.id, { ...base, state: 'skipped', skip_reason: null });
+  } else if (action === 'reject' && reply) {
+    db.update('comments', c.id, { ...base, state: 'skipped', skip_reason: reply, reply_edited: 1, clarify: 0 });
+  } else if (action === 'reply' && reply) {
+    db.update('comments', c.id, { ...base, state: 'fixed', reply_draft: reply, reply_edited: 1, clarify: 1 });
+  } else {
+    db.update('comments', c.id, {
+      ...base,
+      state: 'accepted',
+      reply_draft: reply,
+      reply_edited: reply ? 1 : 0,
+      clarify: action === 'reply' ? 1 : 0,
+    });
+    return true;
+  }
+  return false;
+}
+
+/** My decisions on proposals and answers to questions, submitted at once like a review. */
 export function submitDecisions(db: Db, pr: Pr, input: SubmitInput) {
   let needsAgent = false;
   db.transaction(() => {
     for (const d of input.comments ?? []) {
       const c = db.comment(d.id);
       if (!c || c.pr_id !== pr.id || c.state !== 'proposal') continue;
-      const reply = d.replyDraft?.trim() || null;
-      const base = { proposal: d.proposal ?? c.proposal, auto: 0, decision: d.action === 'skip' ? null : d.action };
-      if (d.action === 'skip') {
-        db.update('comments', c.id, { ...base, state: 'skipped', skip_reason: null });
-      } else if (d.action === 'reject' && reply) {
-        db.update('comments', c.id, { ...base, state: 'skipped', skip_reason: reply, reply_edited: 1, clarify: 0 });
-      } else if (d.action === 'reply' && reply) {
-        db.update('comments', c.id, { ...base, state: 'fixed', reply_draft: reply, reply_edited: 1, clarify: 1 });
-      } else {
-        db.update('comments', c.id, {
-          ...base,
-          state: 'accepted',
-          reply_draft: reply,
-          reply_edited: reply ? 1 : 0,
-          clarify: d.action === 'reply' ? 1 : 0,
-        });
-        needsAgent = true;
-      }
+      if (decide(db, c, d.action, d.proposal ?? c.proposal, d.replyDraft ?? null)) needsAgent = true;
     }
     for (const a of input.answers ?? []) {
       const q = db.get<{ id: number; pr_id: number; state: string }>('SELECT id, pr_id, state FROM questions WHERE id = ?', a.id);
@@ -231,8 +239,24 @@ export function submitDecisions(db: Db, pr: Pr, input: SubmitInput) {
     db.update('prs', pr.id, { last_event_at: now() });
     if (needsAgent) db.enqueue(pr.id, 'answers');
   });
+  applyPredecisions(db, pr);
   changed(pr.id);
   return needsAgent;
+}
+
+/**
+ * Once nothing waits for me any more, the agent's pre-decisions take effect together, so all fixes of a round
+ * land in one run and one push. Returns whether they did.
+ */
+export function applyPredecisions(db: Db, pr: Pr): boolean {
+  const proposals = db.comments(pr.id).filter((c) => c.state === 'proposal');
+  if (!proposals.length || proposals.some((c) => !c.decision) || db.questions(pr.id).some((q) => q.state === 'open')) return false;
+  db.transaction(() => {
+    const work = proposals.map((c) => decide(db, c, c.decision!, c.proposal, null));
+    if (work.some(Boolean)) db.enqueue(pr.id, 'answers');
+  });
+  changed(pr.id);
+  return true;
 }
 
 /** Free-text instruction from the PR page; it becomes work for the session. */

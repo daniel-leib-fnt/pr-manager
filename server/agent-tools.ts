@@ -80,7 +80,8 @@ export function createAgentTools(db: Db, prId: number, onBlocked: (reason: strin
           open.map(async (c) => ({
             commentId: c.id,
             kind: c.kind,
-            state: c.state === 'new' ? 'new: triage it' : DECIDED[c.decision ?? 'accept'],
+            state:
+              c.state === 'new' ? 'new: triage it' : DECIDED[c.decision === 'reject' || c.decision === 'reply' ? c.decision : 'accept'],
             author: c.author,
             path: c.path,
             line: c.line,
@@ -145,6 +146,10 @@ export function createAgentTools(db: Db, prId: number, onBlocked: (reason: strin
         if (c.state !== 'new' && c.state !== 'accepted') return fail(`Comment ${commentId} is ${c.state}, not new or accepted.`);
         if (c.state === 'accepted' && (c.decision === 'reject' || c.decision === 'reply'))
           return fail(`I decided to ${c.decision} comment ${commentId}: change no code and use reply instead.`);
+        if (c.state === 'new' && (c.kind === 'thread' || c.kind === 'issue_comment' || c.kind === 'review_body'))
+          return fail(
+            `Do not fix comment ${commentId} during triage: propose it with a predecision. The fix follows once every decision is made.`,
+          );
         if (c.kind === 'ci' && c.state === 'new' && pr().ci_attempts >= setting('maxCiAttempts')) {
           return fail('Automatic CI fixes are exhausted for this PR. Undo your change and use propose instead.');
         }
@@ -171,9 +176,14 @@ export function createAgentTools(db: Db, prId: number, onBlocked: (reason: strin
 
     def(
       'propose',
-      'Puts a comment up for my decision instead of fixing it: describe the change you propose, or for no code change what the reply would say. Do not change code for it yet and do not draft the reply; it is written after my decision. Set clarifying to true when you suggest a reply that asks the reviewer to clarify.',
-      { commentId: z.number(), proposal: z.string(), clarifying: z.boolean().optional() },
-      async ({ commentId, proposal, clarifying }) => {
+      'Records how to handle a comment: describe the change you propose, or for no code change what the reply would say. Set predecision when the workflow lets you decide; leave it out to put the decision to me. Do not change code for it yet and do not draft the reply; both follow once every decision of the PR is made. Set clarifying to true when you suggest a reply that asks the reviewer to clarify.',
+      {
+        commentId: z.number(),
+        proposal: z.string(),
+        predecision: z.enum(['accept', 'reject', 'reply', 'skip']).optional(),
+        clarifying: z.boolean().optional(),
+      },
+      async ({ commentId, proposal, predecision, clarifying }) => {
         const c = ownComment(commentId);
         if (!c || (c.state !== 'new' && c.state !== 'accepted')) return fail(`Comment ${commentId} is not open.`);
         db.update('comments', commentId, {
@@ -181,10 +191,16 @@ export function createAgentTools(db: Db, prId: number, onBlocked: (reason: strin
           proposal,
           reply_draft: null,
           reply_edited: 0,
-          decision: null,
+          decision: predecision ?? null,
           clarify: clarifying ? 1 : 0,
         });
-        return touched(ok(`Proposal for comment ${commentId} saved. I will decide on the dashboard.`));
+        return touched(
+          ok(
+            predecision
+              ? `Comment ${commentId} pre-decided: ${predecision}.`
+              : `Proposal for comment ${commentId} saved. I will decide on the dashboard.`,
+          ),
+        );
       },
     ),
 

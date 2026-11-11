@@ -1,10 +1,11 @@
+import { DatePipe } from '@angular/common';
 import { Component, inject, signal } from '@angular/core';
 import { RouterLink, RouterOutlet } from '@angular/router';
 import { Api } from './api';
 import { Overview } from './overview';
 
 const WIDTH_KEY = 'pr-manager:sidebar-width';
-const DEFAULT_WIDTH = 400;
+const DEFAULT_WIDTH = 380;
 const MIN_WIDTH = 260;
 /** Room the detail column keeps at least. */
 const MIN_DETAIL = 400;
@@ -32,12 +33,39 @@ function saveWidth(w: number) {
 
 @Component({
   selector: 'app-root',
-  imports: [RouterOutlet, RouterLink, Overview],
+  imports: [RouterOutlet, RouterLink, Overview, DatePipe],
   template: `
-    <header class="top">
-      <a routerLink="/" class="brand">pr-manager</a>
-      <span class="conn" [class.off]="!api.connected()">{{ api.connected() ? 'live' : 'offline' }}</span>
-      <a routerLink="/settings" class="nav-right">Settings</a>
+    <header class="topbar">
+      <a routerLink="/" class="brand">
+        <svg
+          width="22"
+          height="22"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          aria-hidden="true"
+        >
+          <circle cx="6" cy="6" r="2.5" />
+          <circle cx="6" cy="18" r="2.5" />
+          <circle cx="18" cy="18" r="2.5" />
+          <path d="M6 8.5v7" />
+          <path d="M18 15.5V9a3 3 0 0 0-3-3h-4" />
+          <path d="M13 3.5 10.5 6 13 8.5" />
+        </svg>
+        pr-manager
+      </a>
+      <div class="topbar-right">
+        <span class="live" [class.off]="!api.connected()">
+          <span class="dot"></span>
+          {{ api.connected() ? 'Live' : 'Offline' }}
+        </span>
+        <span>Last poll {{ api.lastPoll() ? (api.lastPoll() | date: 'HH:mm:ss') : 'never' }}</span>
+        <button (click)="poll()" [disabled]="polling()">{{ polling() ? 'Polling…' : 'Poll now' }}</button>
+        <a routerLink="/settings">Settings</a>
+      </div>
     </header>
     <div class="layout" [style.--sidebar-width.px]="width()">
       <aside class="sidebar"><app-overview /></aside>
@@ -64,8 +92,20 @@ function saveWidth(w: number) {
 export class App {
   protected readonly api = inject(Api);
   protected readonly width = signal(loadWidth());
+  protected readonly polling = signal(false);
   protected readonly defaultWidth = DEFAULT_WIDTH;
   private dragOffset: number | null = null;
+
+  protected async poll() {
+    this.polling.set(true);
+    try {
+      await this.api.pollNow();
+      // The poll bumps the PR versions over the event stream; this covers a poll without changes.
+      this.api.version.update((v) => v + 1);
+    } finally {
+      this.polling.set(false);
+    }
+  }
 
   protected startResize(e: PointerEvent) {
     if (e.button !== 0) return;

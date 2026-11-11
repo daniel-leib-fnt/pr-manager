@@ -41,20 +41,20 @@ Each open item is a review thread, a conversation comment, a review body, a fail
 
 **Checklist items** carry `checklistItem`: one Markdown task line (`- [ ] ...`) from a comment. Each unchecked line is an item of its own, independent of its sibling lines. Handle only that line; the rest of `conversation` is context. Checked lines never reach you.
 
-Triage every item with state `new`:
+Triage every item with state `new`. For review threads, conversation comments, review bodies and checklist lines, do not change code during triage: record a decision with `propose`. Set `predecision` when the case below allows you to decide; the daemon applies all pre-decisions together once nothing waits for me, or together with my decisions when something does. Then you implement them in one go.
 
-1. **Small:** fix it right away, then `mark_fixed` with a reply draft. What counts as small:
+1. **Small:** `propose` with a concrete description of the change and `predecision: accept`. What counts as small:
 
 {{SMALL_CHANGE_RUBRIC}}
 
-2. **Not small:** `propose` with a concrete description of the change. Do not change code for it yet.
-3. **Ambiguous for the reviewer:** several reasonable readings, missing context, or competing valid approaches. Do not guess and do not change code. `propose` with "No code change, clarifying reply" as the proposal, the options you would ask the reviewer to choose from, and `clarifying: true`.
+2. **Not small:** `propose` with a concrete description of the change and no predecision. I decide.
+3. **Ambiguous for the reviewer:** several reasonable readings, missing context, or competing valid approaches. Do not guess. `propose` with "No code change, clarifying reply" as the proposal, the options you would ask the reviewer to choose from, `clarifying: true` and `predecision: reply`.
 4. **Only I can decide**, for example a product or scope question: `ask` one precise question and link it to the item with `commentId`.
-5. **Answer only:** a question or objection that needs no code change. `propose` with "No code change, answer only" as the proposal and the gist of the answer.
-6. **Already done:** the code already does what the item asks, for example because an earlier commit addressed it. `mark_fixed` without changing anything.
+5. **Answer only:** a question or objection that needs no code change. `propose` with "No code change, answer only" as the proposal and the gist of the answer, with `predecision: reply` for a question and `predecision: reject` for a suggestion you decline.
+6. **Already done:** the code already does what the item asks, for example because an earlier commit addressed it. `propose` with "Already done" and the commit or code that does it, and `predecision: accept`.
 7. **No action needed**, such as a bot status message or an approval without remarks: `dismiss`.
 
-Items I decided on carry my decision in `state`; `acceptedProposal` holds the proposal text as I left it, including notes on how to reply.
+Decided items, by me or by your pre-decision, carry the decision in `state`; `acceptedProposal` holds the proposal text as I left it, including notes on how to reply.
 
 - **Accepted** proposals and instructions I typed: implement them, then call `mark_fixed`. If I edited a proposal, my version is the fix: apply it as written and do not fall back to your original proposal. If my version is too vague to turn into an edit, `ask` one targeted question before touching any files.
 - **Rejected:** change no code. Call `reply` with a reply that declines the suggestion and says why. The thread is resolved.
@@ -64,7 +64,7 @@ When an item carries `myReply`, I wrote the reply myself and the daemon posts it
 
 **Merge conflict items** (kind `conflict`): the PR does not rebase cleanly onto its base. Rebase onto the base ref named in the item with `git rebase`. Resolve conflicts that are mechanical, such as imports, neighboring edits or both sides adding entries, and keep the intent of both sides. Run the checks for the files you touched, then `mark_fixed` with an empty reply. The daemon pushes the rebased branch with the batch. If resolving a conflict needs a decision about behavior, run `git rebase --abort` and `propose` with what conflicts and the resolution you suggest.
 
-**Failed CI items** carry the failing logs. Treat them like a comment. When `autoFixAllowed` is false, automatic fixes are exhausted: use `propose` instead.
+**Failed CI items** carry the failing logs. They are no decision: when the fix is small, fix it right away and call `mark_fixed`; otherwise, and always when `autoFixAllowed` is false, `propose` without a predecision.
 
 **Toolchain:** if the repository has a `flake.nix` dev shell and a tool such as `pnpm` is missing, run it through `nix develop -c <command>`.
 

@@ -50,7 +50,8 @@ export interface Pr {
 
 type CommentKind = 'thread' | 'issue_comment' | 'review_body' | 'ci' | 'instruction' | 'conflict';
 // new: not triaged yet; fixed: changed locally (or a reply that keeps the thread open), waiting for push;
-// proposal: waiting for me; accepted: I decided, agent has to implement or write the reply (see `decision`);
+// proposal: waiting for a decision, possibly pre-decided by the agent; accepted: decided, agent has to implement
+// or write the reply (see `decision`);
 // skipped: I skipped (no reason) or rejected (reason = reply), waiting for push; done: finished; gone: deleted on GitHub.
 type CommentState = 'new' | 'fixed' | 'proposal' | 'accepted' | 'skipped' | 'done' | 'gone';
 
@@ -73,8 +74,11 @@ export interface Comment {
   /** 1 when I wrote the reply myself; any other reply carries the reply header. */
   reply_edited: number;
   skip_reason: string | null;
-  /** My decision on a proposal: accept implements it; reject and reply change no code, the agent only writes the reply. */
-  decision: 'accept' | 'reject' | 'reply' | null;
+  /**
+   * Accept implements the proposal; reject and reply change no code, the agent only writes the reply; skip posts
+   * nothing. On a proposal it is the agent's pre-decision (null: the agent leaves it to me); after the submit, mine.
+   */
+  decision: 'accept' | 'reject' | 'reply' | 'skip' | null;
   auto: number;
   note: string | null;
   /** Text of the checklist line this item stands for; null for a whole comment. */

@@ -39,6 +39,14 @@ export interface Pr {
   counts: { proposals: number; questions: number; pending: number; findings: number };
 }
 
+/** A few lines of the file a comment or finding points to, read from the PR's worktree. */
+export interface Excerpt {
+  /** Number of the first line in `text`, 1-based. */
+  start: number;
+  line: number;
+  text: string;
+}
+
 export interface Comment {
   id: number;
   kind: 'thread' | 'issue_comment' | 'review_body' | 'ci' | 'instruction' | 'conflict';
@@ -51,13 +59,15 @@ export interface Comment {
   proposal: string | null;
   reply_draft: string | null;
   skip_reason: string | null;
-  decision: 'accept' | 'reject' | 'reply' | null;
+  /** On a proposal the agent's pre-decision (null: mine to make); afterwards the decision taken. */
+  decision: 'accept' | 'reject' | 'reply' | 'skip' | null;
   auto: number;
   note: string | null;
   /** The checklist line this item stands for; null for a whole comment. */
   task: string | null;
   clarify: number;
   updated_at: string;
+  excerpt: Excerpt | null;
 }
 
 export interface Question {
@@ -78,6 +88,7 @@ export interface Finding {
   body: string;
   state: 'draft' | 'skipped' | 'submitted';
   url: string | null;
+  excerpt: Excerpt | null;
 }
 
 export interface WorkItem {
@@ -139,6 +150,8 @@ export class Api {
   /** Bumped whenever any PR changes; views reload on change. */
   readonly version = signal(0);
   readonly connected = signal(false);
+  /** Time of the last GitHub poll, kept here because the top bar shows it and the PR list loads it. */
+  readonly lastPoll = signal<string | null>(null);
   private readonly live = new Subject<LiveEvent>();
   readonly events: Observable<LiveEvent> = this.live.asObservable();
 

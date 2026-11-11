@@ -24,6 +24,7 @@ function fromDraft(s: Setting, draft: unknown): unknown {
 @Component({
   selector: 'app-settings',
   imports: [FormsModule],
+  host: { class: 'page settings-page' },
   template: `
     <h1>Settings</h1>
     <p class="muted">Changes apply on the next poll or agent run. Reset returns to the Home Manager value or the built-in default.</p>

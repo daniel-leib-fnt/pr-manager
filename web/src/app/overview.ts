@@ -1,7 +1,8 @@
-import { DatePipe } from '@angular/common';
-import { Component, computed, effect, inject, signal } from '@angular/core';
-import { RouterLink, RouterLinkActive } from '@angular/router';
+import { Component, ElementRef, computed, effect, inject, signal, viewChild } from '@angular/core';
+import { Router, RouterLink, RouterLinkActive } from '@angular/router';
 import { Api, type Group, type Pr } from './api';
+import { Ci } from './ci';
+import { nextStep } from './pr-view';
 
 const GROUPS: { key: Group; label: string }[] = [
   { key: 'ready', label: 'Ready to merge' },
@@ -20,12 +21,11 @@ const FILTERS_KEY = 'pr-manager:filters';
 
 interface Filters {
   role: 'all' | 'own' | 'review';
-  needsMe: boolean;
   hideDrafts: boolean;
   ciFailing: boolean;
 }
 
-const NO_FILTERS: Filters = { role: 'all', needsMe: false, hideDrafts: false, ciFailing: false };
+const NO_FILTERS: Filters = { role: 'all', hideDrafts: false, ciFailing: false };
 
 const ROLES: { key: Filters['role']; label: string }[] = [
   { key: 'all', label: 'All' },
@@ -46,14 +46,13 @@ function loadFilters(): Filters {
 
 function matches(pr: Pr, f: Filters, search: string): boolean {
   if (f.role !== 'all' && pr.role !== f.role) return false;
-  if (f.needsMe && pr.group !== 'needs_me' && pr.group !== 'blocked') return false;
   if (f.hideDrafts && pr.is_draft) return false;
   if (f.ciFailing && pr.check_state !== 'FAILURE' && pr.check_state !== 'ERROR') return false;
   if (!search) return true;
   return [pr.title, pr.repo, `#${pr.number}`, pr.author].some((s) => s.toLowerCase().includes(search));
 }
 
-/** Collapsed sections are remembered per browser; Ignored starts collapsed. */
+/** Collapsed sections are remembered per browser; Ignored and Closed start collapsed. */
 function loadCollapsed(): Set<Group> {
   try {
     const raw = localStorage.getItem(COLLAPSED_KEY);
@@ -61,92 +60,114 @@ function loadCollapsed(): Set<Group> {
   } catch {
     // storage unavailable
   }
-  return new Set<Group>(['ignored']);
+  return new Set<Group>(['ignored', 'closed']);
 }
 
+/** Typing into a field must not trigger the list shortcuts. */
+const typing = (e: KeyboardEvent) => e.target instanceof HTMLElement && !!e.target.closest('input, textarea, select, [contenteditable]');
+
+/** The PR list in the sidebar: filters, then one collapsible section per group. */
 @Component({
   selector: 'app-overview',
-  imports: [RouterLink, RouterLinkActive, DatePipe],
+  imports: [RouterLink, RouterLinkActive, Ci],
+  host: { '(document:keydown)': 'shortcut($event)' },
   template: `
-    <div class="toolbar">
-      <span class="muted">Last poll: {{ lastPoll() ? (lastPoll() | date: 'HH:mm:ss') : 'never' }}</span>
-      <button (click)="poll()" [disabled]="polling()">
-        {{ polling() ? 'Polling…' : 'Poll now' }}
-      </button>
-    </div>
-
-    <div class="filters">
-      <input
-        type="search"
-        placeholder="Search title, repo, #number, author"
-        [value]="search()"
-        (input)="search.set($any($event.target).value)"
-      />
+    <div class="side-filters">
+      <label class="search">
+        <svg
+          width="16"
+          height="16"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+          stroke-linecap="round"
+          aria-hidden="true"
+        >
+          <circle cx="11" cy="11" r="7" />
+          <path d="m20 20-3.5-3.5" />
+        </svg>
+        <input
+          #searchBox
+          type="search"
+          aria-label="Search pull requests"
+          placeholder="Search title, repo, #, author"
+          [value]="search()"
+          (input)="search.set($any($event.target).value)"
+        />
+        <span class="kbd">/</span>
+      </label>
       <div class="filter-row">
-        <span class="segmented">
+        <span class="segmented" role="group" aria-label="Role">
           @for (r of roles; track r.key) {
-            <button [class.on]="filters().role === r.key" (click)="setFilter({ role: r.key })">{{ r.label }}</button>
+            <button
+              [class.on]="filters().role === r.key"
+              [attr.aria-pressed]="filters().role === r.key"
+              (click)="setFilter({ role: r.key })"
+            >
+              {{ r.label }}
+            </button>
           }
         </span>
-        <button [class.on]="filters().needsMe" (click)="setFilter({ needsMe: !filters().needsMe })">Needs me</button>
-        <button [class.on]="filters().hideDrafts" (click)="setFilter({ hideDrafts: !filters().hideDrafts })">Hide drafts</button>
-        <button [class.on]="filters().ciFailing" (click)="setFilter({ ciFailing: !filters().ciFailing })">CI failing</button>
+        <button
+          class="pill"
+          [class.on]="filters().hideDrafts"
+          [attr.aria-pressed]="filters().hideDrafts"
+          (click)="setFilter({ hideDrafts: !filters().hideDrafts })"
+        >
+          Hide drafts
+        </button>
+        <button
+          class="pill"
+          [class.on]="filters().ciFailing"
+          [attr.aria-pressed]="filters().ciFailing"
+          (click)="setFilter({ ciFailing: !filters().ciFailing })"
+        >
+          CI failing
+        </button>
       </div>
     </div>
 
     @for (g of groups(); track g.key) {
-      <section class="group">
-        <h2 class="toggle" (click)="toggle(g.key)">
-          <span class="caret">{{ collapsed().has(g.key) ? '▸' : '▾' }}</span>
-          {{ g.label }}
-          <span class="count">{{ g.prs.length }}</span>
+      <section [class.collapsed]="collapsed().has(g.key)">
+        <h2>
+          <button
+            class="group-toggle"
+            [class]="g.key"
+            [class.group-folded]="collapsed().has(g.key) && (g.key === 'ignored' || g.key === 'closed')"
+            [attr.aria-expanded]="!collapsed().has(g.key)"
+            (click)="toggle(g.key)"
+          >
+            <svg
+              class="chevron"
+              width="12"
+              height="12"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2.5"
+              stroke-linecap="round"
+              aria-hidden="true"
+            >
+              <path d="m6 9 6 6 6-6" />
+            </svg>
+            {{ g.label }}
+            <span class="count">{{ g.prs.length }}</span>
+          </button>
         </h2>
         @if (!collapsed().has(g.key)) {
           <ul class="pr-list">
             @for (pr of g.prs; track pr.id) {
               <li>
-                <a [routerLink]="['/pr', pr.id]" routerLinkActive="active" class="pr-row">
-                  <span class="badge" [class]="pr.role">{{ pr.role === 'own' ? 'mine' : 'review' }}</span>
-                  <span class="ref">{{ pr.repo }}#{{ pr.number }}</span>
-                  <span class="title">{{ pr.title }}</span>
-                  <span class="chips">
-                    @if (pr.is_draft) {
-                      <span class="chip">draft</span>
-                    }
-                    @if (pr.waitingForBuild) {
-                      <span class="chip warn">waiting for build</span>
-                    }
-                    @if (pr.paused) {
-                      <span class="chip warn">paused</span>
-                    }
-                    @if (pr.running) {
-                      <span class="chip live">working</span>
-                    }
-                    @if (pr.counts.proposals) {
-                      <span class="chip need">{{ pr.counts.proposals }} proposal(s)</span>
-                    }
-                    @if (pr.counts.questions) {
-                      <span class="chip need">{{ pr.counts.questions }} question(s)</span>
-                    }
-                    @if (pr.review_state === 'draft') {
-                      <span class="chip need">review draft</span>
-                    }
-                    @if (pr.batch === 'closable') {
-                      <span class="chip live" [title]="pr.counts.pending + ' item(s) to push'">waiting for push</span>
-                    } @else if (pr.counts.pending) {
-                      <span class="chip">{{ pr.counts.pending }} to push</span>
-                    }
-                    @if (pr.check_state) {
-                      <span class="chip" [class]="'ci-' + pr.check_state.toLowerCase()">{{ pr.check_state.toLowerCase() }}</span>
-                    }
-                    @if (pr.state !== 'open') {
-                      <span class="chip">{{ pr.state }}</span>
-                    }
+                <a [routerLink]="['/pr', pr.id]" routerLinkActive="active" class="pr-item">
+                  <span class="pr-line1">
+                    <span class="tag small" [class]="pr.role">{{ pr.role === 'own' ? 'Mine' : 'Review' }}</span>
+                    <span class="ref">{{ shortRepo(pr.repo) }}#{{ pr.number }}</span>
+                    <app-ci [state]="pr.check_state" />
                   </span>
+                  <span class="pr-title">{{ pr.title }}</span>
+                  <span class="pr-next">{{ next(pr) }}</span>
                 </a>
-                @if (pr.blocked) {
-                  <div class="blocked-line">{{ pr.blocked }}</div>
-                }
               </li>
             }
           </ul>
@@ -154,21 +175,22 @@ function loadCollapsed(): Set<Group> {
       </section>
     }
     @if (!prs().length) {
-      <p class="muted">No pull requests yet. The first poll may still be running.</p>
+      <p class="muted side-empty">No pull requests yet. The first poll may still be running.</p>
     } @else if (!groups().length) {
-      <p class="muted">No pull requests match the filters.</p>
+      <p class="muted side-empty">No pull requests match the filters.</p>
     }
   `,
 })
 export class Overview {
   private readonly api = inject(Api);
+  private readonly router = inject(Router);
+  private readonly searchBox = viewChild.required<ElementRef<HTMLInputElement>>('searchBox');
   protected readonly prs = signal<Pr[]>([]);
-  protected readonly lastPoll = signal<string | null>(null);
-  protected readonly polling = signal(false);
   protected readonly collapsed = signal(loadCollapsed());
   protected readonly roles = ROLES;
   protected readonly filters = signal(loadFilters());
   protected readonly search = signal('');
+  protected readonly next = nextStep;
   protected readonly groups = computed(() => {
     const f = this.filters();
     const search = this.search().trim().toLowerCase();
@@ -190,7 +212,12 @@ export class Overview {
   private async load() {
     const res = await this.api.prs();
     this.prs.set(res.prs);
-    this.lastPoll.set(res.lastPoll);
+    this.api.lastPoll.set(res.lastPoll);
+  }
+
+  /** The owner is the same for all repositories, so the list shows the repository name only. */
+  protected shortRepo(repo: string) {
+    return repo.split('/').pop();
   }
 
   protected toggle(key: Group) {
@@ -213,13 +240,21 @@ export class Overview {
     }
   }
 
-  protected async poll() {
-    this.polling.set(true);
-    try {
-      await this.api.pollNow();
-      await this.load();
-    } finally {
-      this.polling.set(false);
+  /** `/` focuses the search; J and K open the next and previous PR of the visible list. */
+  protected shortcut(e: KeyboardEvent) {
+    if (typing(e) || e.ctrlKey || e.metaKey || e.altKey) return;
+    if (e.key === '/') {
+      e.preventDefault();
+      this.searchBox().nativeElement.focus();
+      return;
     }
+    if (e.key !== 'j' && e.key !== 'k') return;
+    const visible = this.groups()
+      .filter((g) => !this.collapsed().has(g.key))
+      .flatMap((g) => g.prs.map((p) => p.id));
+    if (!visible.length) return;
+    const current = visible.indexOf(Number(/^\/pr\/(\d+)/.exec(this.router.url)?.[1]));
+    const target = current === -1 ? 0 : Math.min(visible.length - 1, Math.max(0, current + (e.key === 'j' ? 1 : -1)));
+    void this.router.navigate(['/pr', visible[target]]);
   }
 }
