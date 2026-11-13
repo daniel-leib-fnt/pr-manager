@@ -235,6 +235,7 @@ export function createRunner({ db, poller, dashboardUrl }: RunnerDeps) {
       if (!result) error = 'The session ended without a result.';
       else if (result.subtype !== 'success' || result.is_error)
         error = `Session ended with ${result.subtype}${'result' in result ? `: ${result.result}` : ''}`;
+      if (!error) await compact(pr, { ...options, resume: sessionId, sessionId: undefined });
     } catch (e) {
       error = errorMessage(e);
     }
@@ -249,6 +250,17 @@ export function createRunner({ db, poller, dashboardUrl }: RunnerDeps) {
       notify('error', `Agent error: ${pr.repo}#${pr.number}`, error.slice(0, 300), prUrl(pr), `agent-error:${pr.id}`);
     }
     changed(pr.id);
+  }
+
+  /** Compacts the session; a failure only costs a larger context on the next run. */
+  async function compact(pr: Pr, options: Options) {
+    try {
+      for await (const message of query({ prompt: '/compact', options }))
+        if (message.type === 'result' && (message.subtype !== 'success' || message.is_error))
+          console.warn(`compaction for ${pr.repo}#${pr.number} ended with ${message.subtype}`);
+    } catch (e) {
+      console.warn(`compaction for ${pr.repo}#${pr.number} failed: ${errorMessage(e)}`);
+    }
   }
 
   /** Bookkeeping after a successful run, and notifications when I am needed. */
