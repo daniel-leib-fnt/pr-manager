@@ -175,7 +175,7 @@ interface GhThread {
   path: string;
   line: number | null;
   originalLine: number | null;
-  comments: { nodes: GhComment[] };
+  comments: { nodes: (GhComment & { diffHunk: string })[] };
 }
 
 interface GhCheck {
@@ -209,7 +209,7 @@ export async function prDetail(repo: string, number: number): Promise<GhPrDetail
           reviewThreads(first: 100) {
             nodes {
               id isResolved path line originalLine
-              comments(first: 100) { nodes { id databaseId author { login } body createdAt url } }
+              comments(first: 100) { nodes { id databaseId author { login } body createdAt url diffHunk } }
             }
           }
           comments(last: 100) { nodes { id databaseId author { login } body createdAt url } }

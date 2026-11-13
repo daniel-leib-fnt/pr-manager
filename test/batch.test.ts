@@ -15,6 +15,8 @@ const comment = (over: Partial<Comment>): Comment => ({
   body: 'please rename',
   path: 'a.kt',
   line: 3,
+  outdated: 0,
+  diff_hunk: null,
   url: null,
   state: 'new',
   proposal: null,

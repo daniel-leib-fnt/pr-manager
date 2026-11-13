@@ -67,6 +67,10 @@ export interface Comment {
   body: string;
   path: string | null;
   line: number | null;
+  /** 1 when the commented line no longer exists at the PR head; `line` is then the line at the commented commit. */
+  outdated: number;
+  /** GitHub's diff hunk ending at the commented line, for the code excerpt when the worktree cannot provide it. */
+  diff_hunk: string | null;
   url: string | null;
   state: CommentState;
   proposal: string | null;
@@ -182,6 +186,8 @@ CREATE TABLE IF NOT EXISTS comments (
   body TEXT NOT NULL,
   path TEXT,
   line INTEGER,
+  outdated INTEGER NOT NULL DEFAULT 0,
+  diff_hunk TEXT,
   url TEXT,
   state TEXT NOT NULL DEFAULT 'new',
   proposal TEXT,
@@ -246,10 +252,17 @@ export function openDb(path = join(config.stateDir, 'pr-manager.db')) {
   db.exec('PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;');
   db.exec(schema);
   // Columns added after the first release; CREATE TABLE IF NOT EXISTS does not add them.
-  const migrations: [string, string, string][] = [['comments', 'decision', 'TEXT']];
+  const migrations: [string, string, string][] = [
+    ['comments', 'decision', 'TEXT'],
+    ['comments', 'outdated', 'INTEGER NOT NULL DEFAULT 0'],
+    ['comments', 'diff_hunk', 'TEXT'],
+  ];
   for (const [table, column, type] of migrations) {
     const cols = db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[];
-    if (!cols.some((c) => c.name === column)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`);
+    if (cols.some((c) => c.name === column)) continue;
+    db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`);
+    // Existing thread rows get their hunk on the next ingest, which a reset update time forces.
+    if (column === 'diff_hunk') db.exec(`UPDATE prs SET gh_updated_at = '' WHERE role = 'own' AND state = 'open'`);
   }
 
   const all = <T>(sql: string, ...params: SQLInputValue[]) => db.prepare(sql).all(...params) as unknown as T[];

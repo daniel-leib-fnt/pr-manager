@@ -229,12 +229,25 @@ export function createPoller({ db, dashboardUrl }: PollerDeps) {
       added++;
     };
 
+    // Where a thread comment points to; a push moves the line or makes the thread outdated, so rows follow along.
+    const anchor = (t: (typeof d.reviewThreads.nodes)[number], hunk: string | null) => ({
+      path: t.path,
+      line: t.line ?? t.originalLine,
+      outdated: t.line === null ? 1 : 0,
+      diff_hunk: hunk,
+    });
+    const reanchor = (c: Comment, a: ReturnType<typeof anchor>) => {
+      if (c.path !== a.path || c.line !== a.line || c.outdated !== a.outdated || c.diff_hunk !== a.diff_hunk)
+        db.update('comments', c.id, a);
+    };
+
     for (const t of d.reviewThreads.nodes) {
       const cs = t.comments.nodes;
       const last = cs.at(-1);
       if (!last) continue;
       const key = `thread:${t.id}`;
       const c = existing.get(key);
+      if (c) reanchor(c, anchor(t, cs[0].diffHunk));
       if (!c) {
         if (t.isResolved || last.author?.login === me) continue;
         // Checklist lines become items of their own (below); a thread row is only needed for plain text.
@@ -249,8 +262,7 @@ export function createPoller({ db, dashboardUrl }: PollerDeps) {
           last_seen_gh_id: last.id,
           author: cs[0].author?.login ?? null,
           body: formatThread(cs),
-          path: t.path,
-          line: t.line ?? t.originalLine,
+          ...anchor(t, cs[0].diffHunk),
           url: last.url,
         });
         added++;
@@ -284,7 +296,7 @@ export function createPoller({ db, dashboardUrl }: PollerDeps) {
     const sources: {
       source: TaskSource;
       kind: 'thread' | 'issue_comment' | 'review_body';
-      c: GhComment;
+      c: GhComment & { diffHunk?: string };
       thread?: (typeof d.reviewThreads.nodes)[number];
     }[] = [
       ...d.comments.nodes.map((c) => ({ source: { type: 'issue_comment' as const, id: c.databaseId }, kind: 'issue_comment' as const, c })),
@@ -309,6 +321,7 @@ export function createPoller({ db, dashboardUrl }: PollerDeps) {
             db.update('comments', row.id, { state: 'done', note: 'Checked on GitHub.' });
           return;
         }
+        if (row && thread) reanchor(row, anchor(thread, c.diffHunk ?? null));
         if (row || thread?.isResolved) return;
         db.insert('comments', {
           pr_id: pr.id,
@@ -319,9 +332,7 @@ export function createPoller({ db, dashboardUrl }: PollerDeps) {
           url: c.url,
           task: task.text,
           task_source: JSON.stringify(source),
-          ...(thread
-            ? { thread_id: thread.id, reply_to_db_id: c.databaseId, path: thread.path, line: thread.line ?? thread.originalLine }
-            : {}),
+          ...(thread ? { thread_id: thread.id, reply_to_db_id: c.databaseId, ...anchor(thread, c.diffHunk ?? null) } : {}),
         });
         added++;
       });

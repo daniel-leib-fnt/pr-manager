@@ -28,3 +28,30 @@ export function excerpt(worktree: string | null, path: string | null, line: numb
     return null;
   }
 }
+
+/**
+ * The commented line and up to `before` lines above it, from the diff hunk GitHub keeps with a review comment.
+ * The hunk ends at the commented line; a last line starting with `-` puts the comment on the old side.
+ */
+export function fromHunk(hunk: string, before = 6): Excerpt | null {
+  const [header, ...lines] = hunk.split('\n');
+  const m = /^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/.exec(header);
+  if (!m || !lines.length) return null;
+  const old = lines.at(-1)!.startsWith('-');
+  const side = lines.filter((l) => !l.startsWith(old ? '+' : '-')).map((l) => l.slice(1));
+  const line = Number(old ? m[1] : m[2]) + side.length - 1;
+  const shown = side.slice(-(before + 1));
+  return { start: line - shown.length + 1, line, text: shown.join('\n') };
+}
+
+/**
+ * The excerpt for a review comment: the current file from the worktree, or the hunk GitHub kept when the
+ * worktree cannot provide it or the thread is outdated, since the current file no longer holds the commented code.
+ */
+export function commentExcerpt(
+  worktree: string | null,
+  c: { path: string | null; line: number | null; outdated: number; diff_hunk: string | null },
+): Excerpt | null {
+  const fromWorktree = c.outdated ? null : excerpt(worktree, c.path, c.line);
+  return fromWorktree ?? (c.diff_hunk ? fromHunk(c.diff_hunk) : null);
+}

@@ -6,7 +6,7 @@ import { type ReviewInput, type SubmitInput, addInstruction, submitDecisions, su
 import { batchStatus, buildGreen, runnable } from './batch.ts';
 import { config } from './config.ts';
 import type { Db, Pr } from './db.ts';
-import { excerpt } from './excerpt.ts';
+import { commentExcerpt, excerpt } from './excerpt.ts';
 import { findingUrl } from './github.ts';
 import type { Poller } from './poller.ts';
 import type { Runner } from './runner.ts';
@@ -92,7 +92,7 @@ export function createHttp({ db, poller, runner }: { db: Db; poller: Poller; run
   const prRoutes: Record<string, Handler> = {
     'GET ': async (_q, _r, pr) => ({
       pr: summary(db, pr, runner.isRunning(pr.id)),
-      comments: db.comments(pr.id).map((c) => ({ ...c, excerpt: excerpt(pr.worktree, c.path, c.line) })),
+      comments: db.comments(pr.id).map((c) => ({ ...c, excerpt: commentExcerpt(pr.worktree, c) })),
       questions: db.questions(pr.id),
       findings: db.findings(pr.id).map((f) => ({ ...f, url: findingUrl(pr, f), excerpt: excerpt(pr.worktree, f.path, f.line) })),
       work: db.workItems(pr.id).slice(-30),
