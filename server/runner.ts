@@ -182,6 +182,13 @@ export function createRunner({ db, poller, dashboardUrl }: RunnerDeps) {
       .questions(pr.id)
       .filter((q) => q.state === 'answered')
       .map((q) => q.id);
+    // Comments that arrive or are decided during the run stay open for the next run.
+    const openAtStart = new Set(
+      db
+        .comments(pr.id)
+        .filter((c) => c.state === 'new' || c.state === 'accepted')
+        .map((c) => c.id),
+    );
     for (const i of items) db.update('work_items', i.id, { state: 'in_progress', started_at: now() });
     db.update('prs', pr.id, { session_id: sessionId, agent_running: 1, interrupted: 0 });
     changed(pr.id);
@@ -245,7 +252,7 @@ export function createRunner({ db, poller, dashboardUrl }: RunnerDeps) {
     for (const i of items) db.update('work_items', i.id, { state: error ? 'failed' : 'done', error: error ?? null, finished_at: now() });
     if (!error) {
       for (const id of answeredIds) db.update('questions', id, { state: 'sent' });
-      afterRun(db.pr(pr.id)!, kinds);
+      afterRun(db.pr(pr.id)!, kinds, openAtStart);
     } else {
       notify('error', `Agent error: ${pr.repo}#${pr.number}`, error.slice(0, 300), prUrl(pr), `agent-error:${pr.id}`);
     }
@@ -264,7 +271,7 @@ export function createRunner({ db, poller, dashboardUrl }: RunnerDeps) {
   }
 
   /** Bookkeeping after a successful run, and notifications when I am needed. */
-  function afterRun(pr: Pr, kinds: Set<WorkKind>) {
+  function afterRun(pr: Pr, kinds: Set<WorkKind>, openAtStart: Set<number>) {
     const openQuestionComments = new Set(
       db
         .questions(pr.id)
@@ -273,7 +280,7 @@ export function createRunner({ db, poller, dashboardUrl }: RunnerDeps) {
     );
     for (const c of db.comments(pr.id)) {
       if (pr.role === 'review' && c.kind === 'instruction' && c.state === 'accepted') db.update('comments', c.id, { state: 'done' });
-      if (pr.role !== 'own' || openQuestionComments.has(c.id)) continue;
+      if (pr.role !== 'own' || openQuestionComments.has(c.id) || !openAtStart.has(c.id)) continue;
       if (c.state === 'new')
         db.update('comments', c.id, {
           state: 'proposal',
