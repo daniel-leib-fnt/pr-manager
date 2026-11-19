@@ -24,7 +24,9 @@ import { nextStep, plural } from './pr-view';
           Needs me
         </span>
         <span class="tile-value">{{ needsMe().length }}</span>
-        <span class="tile-note">{{ plural(count('proposals'), 'proposal') }} · {{ plural(drafts(), 'review draft') }}</span>
+        <span class="tile-note">
+          {{ plural(count('proposals'), 'proposal') }} · {{ plural(drafts(), 'review draft') }} · {{ blocked() }} blocked
+        </span>
       </div>
       <div class="tile">
         <span class="tile-label" style="color: var(--info)">
@@ -48,7 +50,6 @@ import { nextStep, plural } from './pr-view';
           Ready to merge
         </span>
         <span class="tile-value">{{ inGroup('ready').length }}</span>
-        <span class="tile-note">{{ plural(inGroup('blocked').length, 'PR') }} blocked</span>
       </div>
     </section>
 
@@ -88,9 +89,14 @@ export class Home {
   protected readonly next = nextStep;
   protected readonly open = computed(() => this.prs().filter((p) => p.state === 'open' && !p.ignored));
   protected readonly mine = computed(() => this.open().filter((p) => p.role === 'own').length);
-  /** Oldest first: the PR that has waited longest comes up next. */
-  protected readonly needsMe = computed(() => this.inGroup('needs_me').sort((a, b) => a.gh_updated_at.localeCompare(b.gh_updated_at)));
+  /** Oldest first: the PR that has waited longest comes up next. Closed PRs whose cleanup is blocked count too. */
+  protected readonly needsMe = computed(() =>
+    this.prs()
+      .filter((p) => p.group === 'needs_me')
+      .sort((a, b) => a.gh_updated_at.localeCompare(b.gh_updated_at)),
+  );
   protected readonly drafts = computed(() => this.needsMe().filter((p) => p.review_state === 'draft').length);
+  protected readonly blocked = computed(() => this.needsMe().filter((p) => p.blocked).length);
 
   constructor() {
     effect(() => {

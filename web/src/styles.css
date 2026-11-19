@@ -599,8 +599,7 @@ label select {
   margin-left: auto;
   font-weight: 500;
 }
-.group-toggle.needs_me,
-.group-toggle.blocked {
+.group-toggle.needs_me {
   color: var(--warn);
 }
 .group-toggle.working,

@@ -2,12 +2,12 @@ import { Component, ElementRef, computed, effect, inject, signal, viewChild } fr
 import { Router, RouterLink, RouterLinkActive } from '@angular/router';
 import { Api, type Group, type Pr } from './api';
 import { Ci } from './ci';
+import { setFaviconBadge } from './favicon';
 import { nextStep } from './pr-view';
 
 const GROUPS: { key: Group; label: string }[] = [
   { key: 'ready', label: 'Ready to merge' },
   { key: 'needs_me', label: 'Needs me' },
-  { key: 'blocked', label: 'Blocked' },
   { key: 'working', label: 'Agent working' },
   { key: 'queued', label: 'Queued' },
   { key: 'push', label: 'Waiting for push' },
@@ -163,6 +163,9 @@ const typing = (e: KeyboardEvent) => e.target instanceof HTMLElement && !!e.targ
                 <a [routerLink]="['/pr', pr.id]" routerLinkActive="active" class="pr-item">
                   <span class="pr-line1">
                     <span class="tag small" [class]="pr.role">{{ pr.role === 'own' ? 'Mine' : 'Review' }}</span>
+                    @if (pr.blocked) {
+                      <span class="tag small bad">Blocked</span>
+                    }
                     <span class="ref">{{ shortRepo(pr.repo) }}#{{ pr.number }}</span>
                     <app-ci [state]="pr.check_state" />
                   </span>
@@ -208,6 +211,8 @@ export class Overview {
       this.api.version();
       void this.load();
     });
+    // The sidebar is on every page, so it keeps the tab icon badge current; filters do not apply.
+    effect(() => void setFaviconBadge(this.prs().filter((p) => p.group === 'needs_me').length));
   }
 
   private async load() {

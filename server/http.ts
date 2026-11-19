@@ -13,12 +13,13 @@ import type { Runner } from './runner.ts';
 import { deniedCalls, describeNixOnly, describeSettings, isExcluded, resetOverride, saveOverrides } from './settings.ts';
 import { bus, changed, clearNotification, errorMessage } from './util.ts';
 
-type Group = 'ready' | 'needs_me' | 'working' | 'queued' | 'push' | 'blocked' | 'out_of_date' | 'waiting' | 'ignored' | 'closed';
+type Group = 'ready' | 'needs_me' | 'working' | 'queued' | 'push' | 'out_of_date' | 'waiting' | 'ignored' | 'closed';
 
 function groupOf(db: Db, pr: Pr): Group {
-  if (pr.state !== 'open') return pr.blocked ? 'blocked' : 'closed';
+  // A blocked PR waits for me to resolve it by hand; the list marks it with a Blocked tag.
+  if (pr.state !== 'open') return pr.blocked ? 'needs_me' : 'closed';
   if (pr.ignored) return 'ignored';
-  if (pr.blocked) return 'blocked';
+  if (pr.blocked) return 'needs_me';
   if (pr.agent_running) return 'working';
   const comments = db.comments(pr.id);
   const questions = db.questions(pr.id);
