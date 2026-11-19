@@ -87,9 +87,10 @@ in
       description = ''
         Defaults for the behavior settings. Changes made on the dashboard's settings page override
         them until reset there. Keys: pollIntervalMinutes, pollDays (0 = Sunday), pollFromHour,
-        pollToHour, ownQuery, reviewQuery, excludedRepos, reviewWaitForGreenBuild,
+        pollToHour, ownQuery, reviewQuery, excludedRepos, ignoredChecks, minSuccessfulChecks,
+        minSuccessfulChecksPerRepo ({ "owner/repo" = 3; }), reviewWaitForGreenBuild,
         autoFollowupOnReRequest, reviewGuidelines, smallChangeRubric, maxCiAttempts,
-        ciIgnoredPendingChecks, batchQuietMinutes, resolveThreads ("fixed_and_skipped_with_reason",
+        batchQuietMinutes, resolveThreads ("fixed_and_skipped_with_reason",
         "fixed", "never"), replyHeader ({viewer} is replaced), autoRemoveMergedWorktrees, allowedTools,
         maxParallelSessions, model, maxTurns, maxBudgetUsd, notify ("input", "review_draft",
         "blocked", "error"). Unknown keys and invalid values are logged and ignored.

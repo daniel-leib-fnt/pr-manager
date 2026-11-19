@@ -4,19 +4,32 @@ import { Api, type DeniedCall, type NixOnly, type Setting } from './api';
 
 const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
-/** Editable text form of a value; lists are one entry per line. */
+/** Editable text form of a value; lists are one entry per line, maps one "key value" per line. */
 function toDraft(s: Setting): unknown {
   if (s.type === 'list') return (s.value as string[]).join('\n');
+  if (s.type === 'map')
+    return Object.entries(s.value as Record<string, unknown>)
+      .map(([k, v]) => `${k} ${v}`)
+      .join('\n');
   if (s.type === 'days' || s.type === 'multi') return [...(s.value as unknown[])];
   return s.value;
 }
 
+const lines = (draft: unknown) =>
+  String(draft)
+    .split('\n')
+    .map((l) => l.trim())
+    .filter(Boolean);
+
 function fromDraft(s: Setting, draft: unknown): unknown {
-  if (s.type === 'list')
-    return String(draft)
-      .split('\n')
-      .map((l) => l.trim())
-      .filter(Boolean);
+  if (s.type === 'list') return lines(draft);
+  // A line without a number becomes NaN, which the server rejects with a message.
+  if (s.type === 'map')
+    return Object.fromEntries(
+      lines(draft)
+        .map((l) => l.split(/\s+/))
+        .map(([k, v]) => [k, Number(v)]),
+    );
   if (s.type === 'number') return Number(draft);
   return draft;
 }

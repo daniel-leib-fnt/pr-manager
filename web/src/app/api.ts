@@ -113,7 +113,7 @@ export interface Setting {
   group: string;
   label: string;
   help: string | null;
-  type: 'number' | 'boolean' | 'string' | 'text' | 'list' | 'enum' | 'multi' | 'days';
+  type: 'number' | 'boolean' | 'string' | 'text' | 'list' | 'map' | 'enum' | 'multi' | 'days';
   options: { value: string; label: string }[] | null;
   value: unknown;
   source: 'override' | 'nix' | 'default';

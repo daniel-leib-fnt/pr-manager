@@ -5,7 +5,16 @@ import { join } from 'node:path';
 import { afterEach, test } from 'node:test';
 import { openDb } from '../server/db.ts';
 import { selectNext } from '../server/runner.ts';
-import { describeSettings, initSettings, proposeRule, resetOverride, saveOverrides, setting, workflowPrompt } from '../server/settings.ts';
+import {
+  buildRules,
+  describeSettings,
+  initSettings,
+  proposeRule,
+  resetOverride,
+  saveOverrides,
+  setting,
+  workflowPrompt,
+} from '../server/settings.ts';
 
 const nixFile = (values: Record<string, unknown>) => {
   const path = join(mkdtempSync(join(tmpdir(), 'prm-settings-')), 'settings.json');
@@ -36,6 +45,15 @@ test('invalid values are rejected, invalid Nix values fall back to the default',
   assert.throws(() => saveOverrides({ excludedRepos: ['not a repo'] }), /owner\/repo/);
   assert.throws(() => saveOverrides({ nope: true }), /Unknown setting/);
   assert.equal(setting('maxParallelSessions'), 1);
+});
+
+test('build rules take the minimum of the repository, else the global one', () => {
+  const db = openDb(':memory:');
+  initSettings(db, nixFile({ minSuccessfulChecks: 2, minSuccessfulChecksPerRepo: { 'fntsoftware/skalos': 3 } }));
+  assert.deepEqual(buildRules('fntsoftware/Skalos'), { ignored: ['task-list-completed'], minSuccessful: 3 });
+  assert.equal(buildRules('fntsoftware/other').minSuccessful, 2);
+  assert.throws(() => saveOverrides({ minSuccessfulChecksPerRepo: { 'not a repo': 3 } }), /owner\/repo/);
+  assert.throws(() => saveOverrides({ minSuccessfulChecksPerRepo: { 'o/r': 0 } }), /per repository/);
 });
 
 test('the prompt gets the rubric and the review guidelines', () => {

@@ -17,13 +17,17 @@ A local daemon with a dashboard for my GitHub pull requests: the ones I authored
   - An ignored review moves to the "Ignored" section and loses its worktree and agent session; when I stop ignoring it, both start afresh.
   - A follow-up review runs on demand, or automatically when my review is re-requested.
 - **Instructions:** on any PR page I can type a free-text instruction. It becomes an accepted item for the agent, and on my PRs it joins the open batch.
-- **Dashboard:** one page with the PR list on the left and the selected PR on the right. Each list entry shows the build status the way GitHub does (green check, pulsing yellow dot, red cross) and one line on what happens next; every section folds. Comments and findings on a file line show the surrounding code from the worktree, highlighted with Shiki for Kotlin, TypeScript, JavaScript, JSON, XML, YAML, Java, AsciiDoc, Markdown, Nix and shell scripts. `J` and `K` move through the list, `/` focuses the search, and Ctrl+Enter sends an instruction.
+- **Dashboard:** one page with the PR list on the left and the selected PR on the right. Each list entry shows the build status (green check, pulsing yellow dot, red cross; see "Build status" below) and one line on what happens next; every section folds. Comments and findings on a file line show the surrounding code from the worktree, highlighted with Shiki for Kotlin, TypeScript, JavaScript, JSON, XML, YAML, Java, AsciiDoc, Markdown, Nix and shell scripts. `J` and `K` move through the list, `/` focuses the search, and Ctrl+Enter sends an instruction.
 - **Quick filters:** the PR list filters by role (all, mine, reviews), by failing CI, hides drafts, and searches title, repo, number and author. The filters are remembered per browser; the search is not.
 - **Notifications:** a desktop notification appears when I am needed: a decision or question waits, a review draft is ready, a PR is blocked, or something failed.
 
 ## How it works
 
 - **Poller:** every 2 minutes, Monday to Friday, 07:00 to 18:00, it runs two GitHub searches: `author:@me` and `review-requested:@me`, the latter including team requests. Known PRs are also looked up by URL. Only changed PRs get a detail fetch, and only new activity starts an agent.
+- **Build status:** one rule for my PRs and reviews, computed from the single checks of the head commit; required and optional checks count the same. Ignored checks (default `task-list-completed`) are checks that may never finish: they do not hold the build back while they run, but count when they fail.
+  - Green: every check that is not ignored passed (success, skipped or neutral), no check failed, and at least the minimum number of them succeeded (default 1, adjustable per repository), so that a skipped bot check alone, or a few quick checks right after a push, are no build. Reviews start only on a green build.
+  - Failed: a check failed and every check that is not ignored is complete; cancelled checks count as complete. On my PRs this becomes CI work.
+  - Running: anything else, including a PR without checks apart from ignored ones, too few successful checks, and cancelled or stale checks without a failure.
 - **Runner:** one session at a time by default, so builds and tests never collide; never two on the same PR.
   - Each PR's session is resumed by its stored id, with the worktree as working directory.
   - Before a run, the daemon fetches and checks the worktree. A PR is blocked when the worktree has changes it did not make, when an interactive Claude session works in it, or when someone pushed during an open batch that would lose agent work.
@@ -42,8 +46,9 @@ Settings come in two kinds:
 - **Behavior settings:** set defaults with `services.pr-manager.settings`, and change them at runtime on the dashboard's settings page (<http://127.0.0.1:8020/settings>). A change there overrides the Home Manager value until you press Reset.
   - Polling: interval, active days and hours.
   - Scope: both search queries, excluded repositories.
+  - Build: ignored checks, minimum successful checks, globally and per repository.
   - Reviews: wait for a green build, automatic follow-up, review guidelines.
-  - My PRs: the small-change rubric, CI fix attempts, checks that never finish (failed checks are fixed even while these still run; default `task-list-completed`), batch quiet time, thread resolving, reply header, auto-removal of merged worktrees.
+  - My PRs: the small-change rubric, CI fix attempts, batch quiet time, thread resolving, reply header, auto-removal of merged worktrees.
   - Agent: allowed tools, parallel sessions, model, turn and budget limits.
   - Notifications: which events notify.
 

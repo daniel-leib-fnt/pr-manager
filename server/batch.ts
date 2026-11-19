@@ -1,9 +1,8 @@
 import type { Comment, Pr, Question, WorkItem, WorkKind } from './db.ts';
 import { setting } from './settings.ts';
 
-/** Whether a review may start: a green build, or no checks, or waiting is switched off. */
-export const buildGreen = (pr: Pick<Pr, 'check_state'>) =>
-  !setting('reviewWaitForGreenBuild') || !pr.check_state || pr.check_state === 'SUCCESS';
+/** Whether a review may start: a green build (see `buildState`), or waiting is switched off. */
+export const buildGreen = (pr: Pick<Pr, 'check_state'>) => !setting('reviewWaitForGreenBuild') || pr.check_state === 'SUCCESS';
 
 const REVIEW_KINDS = new Set<WorkKind>(['review', 'followup_review']);
 

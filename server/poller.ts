@@ -9,15 +9,15 @@ import {
   type GhPr,
   type GhPrDetail,
   GithubError,
+  buildState,
   failedChecks,
   prDetail,
   prsByUrl,
   readyToMerge,
-  rollupState,
   searchPrs,
   viewer,
 } from './github.ts';
-import { inPollWindow, isExcluded, setting } from './settings.ts';
+import { buildRules, inPollWindow, isExcluded, setting } from './settings.ts';
 import { bus, changed, clearNotification, errorMessage, notify } from './util.ts';
 
 export interface PollerDeps {
@@ -88,7 +88,7 @@ export function createPoller({ db, dashboardUrl }: PollerDeps) {
       is_cross_repo: gh.isCrossRepository ? 1 : 0,
       is_draft: gh.isDraft ? 1 : 0,
       gh_updated_at: gh.updatedAt,
-      check_state: rollupState(gh),
+      check_state: buildState(gh, buildRules(gh.repository.nameWithOwner)),
       in_review_search: inReviewSearch ? 1 : 0,
       // While GitHub still computes the merge state, the last known value stands.
       ready: role === 'own' ? Number(readyToMerge(gh) ?? !!pr?.ready) : 0,
@@ -131,9 +131,8 @@ export function createPoller({ db, dashboardUrl }: PollerDeps) {
     if (role === 'own') {
       if (fields.check_state === 'SUCCESS' && pr.ci_attempts) db.update('prs', pr.id, { ci_attempts: 0 });
       const lostReady = !!prev.ready && !pr.ready;
-      // The rollup can turn FAILURE while other checks still run; ingest then skips CI, and nothing else changes once they finish.
-      const ciUnseen =
-        (pr.check_state === 'FAILURE' || pr.check_state === 'ERROR') && !db.comments(pr.id).some((c) => c.gh_key === `ci:${gh.headRefOid}`);
+      // A failed build that has no CI item yet, for example because ingest failed, is ingested again on every poll.
+      const ciUnseen = pr.check_state === 'FAILURE' && !db.comments(pr.id).some((c) => c.gh_key === `ci:${gh.headRefOid}`);
       // Losing the ready state means something changed on GitHub: look at the PR again, even if its update time did not move.
       if (isChanged || lostReady || ciUnseen) await ingest(pr, me);
       // A moving base does not change the PR's update time, so conflicts are checked on every poll.
@@ -338,11 +337,14 @@ export function createPoller({ db, dashboardUrl }: PollerDeps) {
       });
     }
 
-    const { pending, failed } = failedChecks(d, setting('ciIgnoredPendingChecks'));
-    const headOid = d.headCommit.nodes[0]?.commit.oid ?? d.headRefOid;
+    const headOid = d.commits.nodes[0]?.commit.oid ?? d.headRefOid;
     const ciKey = `ci:${headOid}`;
-    if (!pending && failed.length && !existing.has(ciKey)) {
-      const checks = failed.map((c) => ({ id: c.databaseId ?? null, name: c.name ?? c.context, url: c.detailsUrl ?? c.targetUrl }));
+    if (buildState(d, buildRules(pr.repo)) === 'FAILURE' && !existing.has(ciKey)) {
+      const checks = failedChecks(d).map((c) => ({
+        id: c.databaseId ?? null,
+        name: c.name ?? c.context,
+        url: c.detailsUrl ?? c.targetUrl,
+      }));
       db.insert('comments', {
         pr_id: pr.id,
         kind: 'ci',

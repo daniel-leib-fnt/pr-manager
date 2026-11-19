@@ -48,7 +48,7 @@ function loadFilters(): Filters {
 function matches(pr: Pr, f: Filters, search: string): boolean {
   if (f.role !== 'all' && pr.role !== f.role) return false;
   if (f.hideDrafts && pr.is_draft) return false;
-  if (f.ciFailing && pr.check_state !== 'FAILURE' && pr.check_state !== 'ERROR') return false;
+  if (f.ciFailing && pr.check_state !== 'FAILURE') return false;
   if (!search) return true;
   return [pr.title, pr.repo, `#${pr.number}`, pr.author].some((s) => s.toLowerCase().includes(search));
 }

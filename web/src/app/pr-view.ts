@@ -2,19 +2,17 @@ import type { Pr } from './api';
 
 export type CiStatus = 'success' | 'pending' | 'failure';
 
-/** GitHub's rollup state reduced to the three states GitHub itself shows: check, dot, cross. */
+/** The daemon's build state (`buildState` in server/github.ts) as check, dot or cross. */
 export function ciStatus(checkState: string | null): CiStatus | null {
   switch (checkState) {
     case 'SUCCESS':
       return 'success';
     case 'FAILURE':
-    case 'ERROR':
       return 'failure';
-    case null:
-    case '':
-      return null;
-    default:
+    case 'PENDING':
       return 'pending';
+    default:
+      return null;
   }
 }
 

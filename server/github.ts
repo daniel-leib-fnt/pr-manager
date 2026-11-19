@@ -79,7 +79,13 @@ const PR_FIELDS = `
   headRefName headRefOid baseRefName baseRefOid isCrossRepository
   author { login }
   repository { nameWithOwner }
-  commits(last: 1) { nodes { commit { statusCheckRollup { state } } } }
+  commits(last: 1) {
+    nodes { commit { oid statusCheckRollup { contexts(first: 100) { nodes {
+      __typename
+      ... on CheckRun { databaseId name status conclusion detailsUrl }
+      ... on StatusContext { context state targetUrl }
+    } } } } }
+  }
 `;
 
 export interface GhPr {
@@ -97,7 +103,7 @@ export interface GhPr {
   isCrossRepository: boolean;
   author: { login: string } | null;
   repository: { nameWithOwner: string };
-  commits: { nodes: { commit: { statusCheckRollup: { state: string } | null } }[] };
+  commits: { nodes: { commit: { oid: string; statusCheckRollup: { contexts: { nodes: GhCheck[] } } | null } }[] };
   mergeStateStatus: string;
 }
 
@@ -114,8 +120,44 @@ export function readyToMerge(pr: GhPr): boolean | null {
   return MERGEABLE.has(pr.mergeStateStatus);
 }
 
-export function rollupState(pr: GhPr): string | null {
-  return pr.commits.nodes[0]?.commit.statusCheckRollup?.state ?? null;
+export type BuildState = 'SUCCESS' | 'PENDING' | 'FAILURE';
+
+const PASSED = new Set(['SUCCESS', 'SKIPPED', 'NEUTRAL']);
+const FAILED = new Set(['FAILURE', 'TIMED_OUT', 'STARTUP_FAILURE', 'ACTION_REQUIRED', 'ERROR']);
+
+const checks = (pr: GhPr) => pr.commits.nodes[0]?.commit.statusCheckRollup?.contexts.nodes ?? [];
+/** A check run's conclusion once it completed, or a commit status's state; null while a check run is not complete. */
+const outcome = (c: GhCheck) =>
+  c.__typename === 'CheckRun' ? (c.status === 'COMPLETED' ? (c.conclusion ?? null) : null) : (c.state ?? null);
+const isFailed = (c: GhCheck) => FAILED.has(outcome(c) ?? '');
+/** Complete: a finished check run, or a commit status that is no longer pending or expected. */
+const isComplete = (c: GhCheck) => !['PENDING', 'EXPECTED', ''].includes(outcome(c) ?? '');
+
+export function failedChecks(pr: GhPr): GhCheck[] {
+  return checks(pr).filter(isFailed);
+}
+
+export interface BuildRules {
+  /** Checks that may never finish, such as a task-list check. */
+  ignored: string[];
+  /** How many checks that are not ignored must have succeeded before the build is green. */
+  minSuccessful: number;
+}
+
+/**
+ * The one rule for "is the build green", for my PRs and for reviews alike. Every check counts the same,
+ * required or not. Ignored checks do not hold the build back while they run, but count when they fail.
+ * - FAILURE: a check failed and every check that is not ignored is complete.
+ * - SUCCESS: every check that is not ignored passed (success, skipped or neutral), and at least
+ *   `minSuccessful` of them succeeded, so that skipped bot checks alone are no build.
+ * - PENDING: anything else, including no checks yet, too few successful ones, and cancelled or stale checks.
+ */
+export function buildState(pr: GhPr, rules: BuildRules): BuildState {
+  const relevant = checks(pr).filter((c) => !rules.ignored.includes(c.name ?? c.context ?? ''));
+  if (!relevant.length || !relevant.every(isComplete)) return 'PENDING';
+  if (failedChecks(pr).length) return 'FAILURE';
+  const succeeded = relevant.filter((c) => outcome(c) === 'SUCCESS').length;
+  return relevant.every((c) => PASSED.has(outcome(c) ?? '')) && succeeded >= rules.minSuccessful ? 'SUCCESS' : 'PENDING';
 }
 
 let login: string | undefined;
@@ -195,7 +237,6 @@ export interface GhPrDetail extends GhPr {
   reviewThreads: { nodes: GhThread[] };
   comments: { nodes: GhComment[] };
   reviews: { nodes: (GhComment & { state: string; submittedAt: string | null; commit: { oid: string } | null })[] };
-  headCommit: { nodes: { commit: { oid: string; statusCheckRollup: { state: string; contexts: { nodes: GhCheck[] } } | null } }[] };
 }
 
 export async function prDetail(repo: string, number: number): Promise<GhPrDetail> {
@@ -214,35 +255,12 @@ export async function prDetail(repo: string, number: number): Promise<GhPrDetail
           }
           comments(last: 100) { nodes { id databaseId author { login } body createdAt url } }
           reviews(last: 100) { nodes { id databaseId author { login } body createdAt url state submittedAt commit { oid } } }
-          headCommit: commits(last: 1) {
-            nodes { commit { oid statusCheckRollup { state contexts(first: 100) { nodes {
-              __typename
-              ... on CheckRun { databaseId name status conclusion detailsUrl }
-              ... on StatusContext { context state targetUrl }
-            } } } } }
-          }
         }
       }
     }`,
     { owner, name, number },
   );
   return data.repository.pullRequest;
-}
-
-/** `ignoredPending` names checks that may run forever, such as a task-list check; they never hold back the failed ones. */
-export function failedChecks(detail: GhPrDetail, ignoredPending: string[]): { pending: boolean; failed: GhCheck[] } {
-  const contexts = detail.headCommit.nodes[0]?.commit.statusCheckRollup?.contexts.nodes ?? [];
-  const pending = contexts.some(
-    (c) =>
-      !ignoredPending.includes(c.name ?? c.context ?? '') &&
-      (c.__typename === 'CheckRun' ? c.status !== 'COMPLETED' : c.state === 'PENDING' || c.state === 'EXPECTED'),
-  );
-  const failed = contexts.filter((c) =>
-    c.__typename === 'CheckRun'
-      ? ['FAILURE', 'TIMED_OUT', 'STARTUP_FAILURE', 'ACTION_REQUIRED'].includes(c.conclusion ?? '')
-      : c.state === 'FAILURE' || c.state === 'ERROR',
-  );
-  return { pending, failed };
 }
 
 export interface PrFile {

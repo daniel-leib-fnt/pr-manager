@@ -25,7 +25,7 @@ const DEFAULT_REVIEW_GUIDELINES = `- Read the PR description and the full diff. 
 const NOTIFY_EVENTS = ['input', 'review_draft', 'blocked', 'error'] as const;
 export type NotifyEvent = (typeof NOTIFY_EVENTS)[number];
 
-type FieldType = 'number' | 'boolean' | 'string' | 'text' | 'list' | 'enum' | 'multi' | 'days';
+type FieldType = 'number' | 'boolean' | 'string' | 'text' | 'list' | 'map' | 'enum' | 'multi' | 'days';
 
 interface Def<T> {
   group: string;
@@ -38,6 +38,8 @@ interface Def<T> {
 }
 
 const def = <T>(d: Def<T>) => d;
+
+const REPO = /^[\w.-]+\/[\w.-]+$/;
 
 export const DEFS = {
   pollIntervalMinutes: def({
@@ -83,13 +85,39 @@ export const DEFS = {
     label: 'Excluded repositories',
     help: 'One owner/repo per line. Their PRs are ignored completely.',
     type: 'list',
-    schema: z.array(z.string().regex(/^[\w.-]+\/[\w.-]+$/, 'expected owner/repo')),
+    schema: z.array(z.string().regex(REPO, 'expected owner/repo')),
     default: [] as string[],
+  }),
+  ignoredChecks: def({
+    group: 'Build',
+    label: 'Ignored checks',
+    help: 'One check name per line, for checks that may never finish. While they run, the build can still be green or failed; when they fail, the build fails. Applies to my PRs and reviews.',
+    type: 'list',
+    schema: z.array(z.string().min(1)),
+    default: ['task-list-completed'],
+  }),
+  minSuccessfulChecks: def({
+    group: 'Build',
+    label: 'Minimum successful checks',
+    help: 'The build is green only once this many checks that are not ignored succeeded; skipped and neutral ones do not count. Bridges the time after a push before the real build reports.',
+    type: 'number',
+    schema: z.number().int().min(1).max(100),
+    default: 1,
+  }),
+  minSuccessfulChecksPerRepo: def({
+    group: 'Build',
+    label: 'Minimum successful checks per repository',
+    help: 'One "owner/repo number" per line, for example "fntsoftware/skalos 3". Overrides the minimum above for that repository.',
+    type: 'map',
+    schema: z
+      .record(z.string(), z.number().int().min(1).max(100))
+      .refine((m) => Object.keys(m).every((r) => REPO.test(r)), 'expected owner/repo'),
+    default: {} as Record<string, number>,
   }),
   reviewWaitForGreenBuild: def({
     group: 'Reviews',
     label: 'Wait for a green build before reviewing',
-    help: 'Failing and still running checks hold the review back. A PR without checks counts as green.',
+    help: 'Running and failed checks hold the review back, and so does a PR without checks apart from ignored ones.',
     type: 'boolean',
     schema: z.boolean(),
     default: true,
@@ -124,14 +152,6 @@ export const DEFS = {
     type: 'number',
     schema: z.number().int().min(0).max(10),
     default: 2,
-  }),
-  ciIgnoredPendingChecks: def({
-    group: 'My PRs',
-    label: 'Checks that never finish',
-    help: 'One check name per line. Failed checks become CI work even while these are still running. Their failures still count.',
-    type: 'list',
-    schema: z.array(z.string().min(1)),
-    default: ['task-list-completed'],
   }),
   batchQuietMinutes: def({
     group: 'My PRs',
@@ -332,6 +352,12 @@ export function workflowPrompt(template = readFileSync(config.promptFile, 'utf8'
 }
 
 export const isExcluded = (repo: string) => setting('excludedRepos').some((r) => r.toLowerCase() === repo.toLowerCase());
+
+/** The build rules of one repository, for `buildState`. */
+export function buildRules(repo: string) {
+  const perRepo = Object.entries(setting('minSuccessfulChecksPerRepo')).find(([r]) => r.toLowerCase() === repo.toLowerCase());
+  return { ignored: setting('ignoredChecks'), minSuccessful: perRepo?.[1] ?? setting('minSuccessfulChecks') };
+}
 
 // --- Denied tool calls, kept for the settings page ---------------------------------------
 
