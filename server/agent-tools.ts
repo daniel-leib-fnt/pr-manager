@@ -27,7 +27,7 @@ const def = <S extends Shape>(name: string, description: string, schema: S, hand
   tool(name, description, schema, handler, { alwaysLoad: true });
 
 /** The in-process MCP server through which a session reports results for one PR. */
-export function createAgentTools(db: Db, prId: number, onBlocked: (reason: string) => void) {
+export function createAgentTools(db: Db, prId: number, onBlocked: (reason: string) => void, onReviewDraft: () => void) {
   let detail: GhPrDetail | undefined;
   let lines: Map<string, Set<number>> | undefined;
   const pr = () => db.pr(prId)!;
@@ -241,6 +241,7 @@ export function createAgentTools(db: Db, prId: number, onBlocked: (reason: strin
         lines ??= commentableLines(await prFiles(pr().repo, pr().number));
         const inDiff = lines.get(path)?.has(line) ?? false;
         db.insert('findings', { pr_id: prId, kind: 'finding', path, line, body, in_diff: inDiff ? 1 : 0 });
+        onReviewDraft();
         return touched(ok(inDiff ? 'Finding added.' : 'Finding added; the line is outside the diff, so it goes into the review body.'));
       },
     ),
@@ -251,6 +252,7 @@ export function createAgentTools(db: Db, prId: number, onBlocked: (reason: strin
       { verdict: z.enum(['APPROVE', 'REQUEST_CHANGES', 'COMMENT']), body: z.string() },
       async ({ verdict, body }) => {
         db.update('prs', prId, { review_verdict: verdict, review_body: body });
+        onReviewDraft();
         return touched(ok('Verdict saved.'));
       },
     ),
@@ -271,6 +273,7 @@ export function createAgentTools(db: Db, prId: number, onBlocked: (reason: strin
           line: t.line ?? t.originalLine,
           body,
         });
+        onReviewDraft();
         return touched(ok('Reply drafted.'));
       },
     ),

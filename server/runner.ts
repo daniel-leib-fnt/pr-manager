@@ -171,10 +171,18 @@ export function createRunner({ db, poller, dashboardUrl }: RunnerDeps) {
       if (e instanceof Blocked) return block(pr, e.message);
       throw e;
     }
-    if (kinds.has('review') || kinds.has('followup_review')) {
+    const reviewRun = kinds.has('review') || kinds.has('followup_review');
+    if (reviewRun) {
       db.run(`DELETE FROM findings WHERE pr_id = ?`, pr.id);
-      db.update('prs', pr.id, { review_state: 'none', review_draft_sha: await git(path, ['rev-parse', 'HEAD']) });
+      db.update('prs', pr.id, {
+        review_state: 'none',
+        review_verdict: null,
+        review_body: null,
+        review_draft_sha: await git(path, ['rev-parse', 'HEAD']),
+      });
     }
+    // An instruction can make the agent review, too; its draft must become submittable.
+    let reviewDrafted = false;
     const resume = pr.session_id ?? undefined;
     const sessionId = resume ?? randomUUID();
     const text = prompt(pr, kinds, items);
@@ -217,7 +225,15 @@ export function createRunner({ db, poller, dashboardUrl }: RunnerDeps) {
         disallowedTools: ['AskUserQuestion'],
         settings: { permissions: { deny: DENY } },
         strictMcpConfig: true,
-        mcpServers: { ...extra, [AGENT_TOOL_SERVER]: createAgentTools(db, pr.id, (reason) => block(db.pr(pr.id)!, reason)) },
+        mcpServers: {
+          ...extra,
+          [AGENT_TOOL_SERVER]: createAgentTools(
+            db,
+            pr.id,
+            (reason) => block(db.pr(pr.id)!, reason),
+            () => (reviewDrafted = true),
+          ),
+        },
         canUseTool: async (name, input) => {
           if (fileWriteAllowed(name, input, path)) return { behavior: 'allow', updatedInput: input };
           const detail = name === 'Bash' ? String((input as { command?: unknown }).command ?? '') : JSON.stringify(input).slice(0, 200);
@@ -252,7 +268,10 @@ export function createRunner({ db, poller, dashboardUrl }: RunnerDeps) {
     for (const i of items) db.update('work_items', i.id, { state: error ? 'failed' : 'done', error: error ?? null, finished_at: now() });
     if (!error) {
       for (const id of answeredIds) db.update('questions', id, { state: 'sent' });
-      afterRun(db.pr(pr.id)!, kinds, openAtStart);
+      const current = db.pr(pr.id)!;
+      if (!reviewRun && reviewDrafted && current.role === 'review' && current.review_state !== 'draft')
+        db.update('prs', pr.id, { review_draft_sha: await git(path, ['rev-parse', 'HEAD']) });
+      afterRun(db.pr(pr.id)!, kinds, openAtStart, reviewDrafted);
     } else {
       notify('error', `Agent error: ${pr.repo}#${pr.number}`, error.slice(0, 300), prUrl(pr), `agent-error:${pr.id}`);
     }
@@ -271,7 +290,7 @@ export function createRunner({ db, poller, dashboardUrl }: RunnerDeps) {
   }
 
   /** Bookkeeping after a successful run, and notifications when I am needed. */
-  function afterRun(pr: Pr, kinds: Set<WorkKind>, openAtStart: Set<number>) {
+  function afterRun(pr: Pr, kinds: Set<WorkKind>, openAtStart: Set<number>, reviewDrafted: boolean) {
     const openQuestionComments = new Set(
       db
         .questions(pr.id)
@@ -295,7 +314,7 @@ export function createRunner({ db, poller, dashboardUrl }: RunnerDeps) {
         });
     }
     if (pr.role === 'own' && applyPredecisions(db, pr)) bus.emit('wake');
-    if (kinds.has('review') || kinds.has('followup_review')) {
+    if (kinds.has('review') || kinds.has('followup_review') || (pr.role === 'review' && reviewDrafted)) {
       db.update('prs', pr.id, { review_state: 'draft' });
       if (!pr.ignored) notify('review_draft', `Review draft ready: ${pr.repo}#${pr.number}`, pr.title, prUrl(pr));
       return;
