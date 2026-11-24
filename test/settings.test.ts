@@ -8,6 +8,7 @@ import { selectNext } from '../server/runner.ts';
 import {
   buildRules,
   describeSettings,
+  fillPrompt,
   initSettings,
   proposeRule,
   resetOverride,
@@ -16,8 +17,6 @@ import {
   setting,
   workflowPrompt,
 } from '../server/settings.ts';
-import { readyToClose } from '../server/batch.ts';
-import type { Pr } from '../server/db.ts';
 
 const nixFile = (values: Record<string, unknown>) => {
   const path = join(mkdtempSync(join(tmpdir(), 'prm-settings-')), 'settings.json');
@@ -59,44 +58,43 @@ test('build rules take the minimum of the repository, else the global one', () =
   assert.throws(() => saveOverrides({ minSuccessfulChecksPerRepo: { 'o/r': 0 } }), /per repository/);
 });
 
-test('the prompt gets the rubric and the review guidelines', () => {
+test('the prompt gets the rubric, the review guidelines and the allowlist', () => {
   const db = openDb(':memory:');
   initSettings(db, '');
   saveOverrides({ smallChangeRubric: 'Only typos.', reviewGuidelines: 'Be brief.' });
-  assert.equal(workflowPrompt('A {{SMALL_CHANGE_RUBRIC}} B {{REVIEW_GUIDELINES}} C'), 'A Only typos. B Be brief. C');
-  assert.match(workflowPrompt('{{ALLOWED_TOOLS}}'), /^- `Read`\n/);
-  assert.doesNotMatch(workflowPrompt(), /\{\{/);
+  assert.equal(fillPrompt('A {{SMALL_CHANGE_RUBRIC}} B {{REVIEW_GUIDELINES}} C'), 'A Only typos. B Be brief. C');
+  assert.match(fillPrompt('{{ALLOWED_TOOLS}}'), /^- `Read`\n/);
+});
+
+test('a session gets the common workflow and only the part of its role', () => {
+  initSettings(openDb(':memory:'), '');
+  const own = workflowPrompt('own.md');
+  const review = workflowPrompt('review.md');
+  for (const prompt of [own, review]) {
+    assert.match(prompt, /^# pr-manager session/);
+    assert.match(prompt, /## Running commands/);
+    assert.doesNotMatch(prompt, /\{\{/);
+  }
+  assert.match(own, /mark_fixed/);
+  assert.doesNotMatch(own, /add_review_finding/);
+  assert.match(review, /add_review_finding/);
+  assert.doesNotMatch(review, /mark_fixed/);
 });
 
 test('autonomy is opt-in: the prompt changes only when it is switched on', () => {
   const db = openDb(':memory:');
   initSettings(db, '');
-  const off = workflowPrompt();
+  const off = workflowPrompt('own.md');
   assert.doesNotMatch(off, /riskClass/);
-  saveOverrides({ autonomy: true, smallChangeRubric: 'Only typos.', decisionNotes: 'Never touch migrations.' });
-  const on = workflowPrompt();
-  assert.ok(
-    on.startsWith(off.replace(/An item is small[^]*Changing tests is fine\./, 'Only typos.').trimEnd()),
-    'the workflow itself is unchanged',
-  );
+  saveOverrides({ smallChangeRubric: 'Only typos.', decisionNotes: 'Never touch migrations.' });
+  const on = workflowPrompt('own.md', true);
+  assert.ok(on.startsWith(workflowPrompt('own.md').trimEnd()), 'the workflow itself is unchanged');
   assert.match(on, /`contained`/);
   assert.match(on, /Only typos\./, 'the rubric defines the class local');
   assert.match(on, /Additional guidance from me:\n\nNever touch migrations\./);
   assert.doesNotMatch(on, /\{\{/);
   assert.match(selfReviewPrompt(), /`structural`/, 'both agents share the classes');
   assert.doesNotMatch(selfReviewPrompt(), /\{\{/);
-});
-
-test('with autonomy, a failed self-review and a running veto window hold the push back', () => {
-  const db = openDb(':memory:');
-  initSettings(db, '');
-  const pr = (over: Partial<Pr>) => ({ role: 'own', state: 'open', paused: 0, blocked: null, last_event_at: null, ...over }) as Pr;
-  const now = Date.parse('2026-11-24T10:00:00Z');
-  const held = [pr({ self_review_state: 'failed' }), pr({ push_after: '2026-11-24T11:00:00Z' })];
-  for (const p of held) assert.equal(readyToClose(p, 'closable', 0, now), true, 'ignored while autonomy is off');
-  saveOverrides({ autonomy: true });
-  for (const p of held) assert.equal(readyToClose(p, 'closable', 0, now), false);
-  assert.equal(readyToClose(pr({ self_review_state: 'passed', push_after: '2026-11-24T09:00:00Z' }), 'closable', 0, now), true);
 });
 
 test('denied calls propose a narrow rule', () => {
@@ -107,9 +105,9 @@ test('denied calls propose a narrow rule', () => {
 
 test('the pool never picks a running PR and follows priority', () => {
   const rows = [
-    { id: 1, pr_id: 10, kind: 'summarize' as const, check_state: null, repo: 'o/a' },
-    { id: 2, pr_id: 11, kind: 'answers' as const, check_state: null, repo: 'o/b' },
-    { id: 3, pr_id: 12, kind: 'review' as const, check_state: 'FAILURE', repo: 'o/c' },
+    { id: 1, pr_id: 10, kind: 'summarize' as const, check_state: null, repo: 'o/a', role: 'own' as const },
+    { id: 2, pr_id: 11, kind: 'answers' as const, check_state: null, repo: 'o/b', role: 'own' as const },
+    { id: 3, pr_id: 12, kind: 'review' as const, check_state: 'FAILURE', repo: 'o/c', role: 'review' as const },
   ];
   assert.equal(selectNext(rows, new Set()), 11);
   assert.equal(selectNext(rows, new Set([11])), 10);

@@ -10,15 +10,18 @@ const env = process.env;
  * Values only Home Manager sets, because the daemon needs them before it starts or because
  * changing them at runtime would orphan files. Behavior settings live in settings.ts.
  */
+const port = Number(env.PR_MANAGER_PORT ?? 8020);
+
 export const config = {
-  port: Number(env.PR_MANAGER_PORT ?? 8020),
+  port,
+  dashboardUrl: `http://127.0.0.1:${port}`,
   stateDir: env.PR_MANAGER_STATE_DIR ?? join(env.XDG_STATE_HOME ?? join(homedir(), '.local/state'), 'pr-manager'),
   srcRoot: env.PR_MANAGER_SRC_ROOT ?? join(homedir(), 'SC/github'),
   // {clone} is the clone path, {owner}/{repo} the GitHub names, {branch} the head branch with / replaced by -.
   worktreeDir: env.PR_MANAGER_WORKTREE_DIR ?? '{clone}.worktrees/{branch}',
   sessionsDir: join(env.CLAUDE_CONFIG_DIR ?? join(homedir(), '.claude'), 'sessions'),
   webDir: env.PR_MANAGER_WEB_DIR ?? join(repoRoot, 'web/dist/web/browser'),
-  promptFile: join(repoRoot, 'prompts/workflow.md'),
+  promptDir: join(repoRoot, 'prompts'),
   claudePath: env.PR_MANAGER_CLAUDE_PATH,
   mcpServersFile: env.PR_MANAGER_MCP_SERVERS,
 };

@@ -55,6 +55,7 @@ Worktrees live at `~/SC/github/<org>/<repo>.worktrees/<branch-with-dash>`. Clone
 Settings come in two kinds:
 
 - **Home Manager only:** `port`, `checkoutRoot`, `worktreeDir`, `stateDir`, `extraPackages`, `tokenAttributes`. The daemon needs these before it starts, or changing them would move files.
+- **Database:** the state lives in `pr-manager.db` in `stateDir`. The version that keeps the columns of my own PRs and of reviews in tables of their own migrates an older database on its first start and keeps a copy next to it as `pr-manager.db.before-role-tables`. Going back to an older version needs that copy.
 - **Behavior settings:** set defaults with `services.pr-manager.settings`, and change them at runtime on the dashboard's settings page (<http://127.0.0.1:8020/settings>). A change there overrides the Home Manager value until you press Reset.
   - Polling: interval, active days and hours.
   - Scope: both search queries, excluded repositories.

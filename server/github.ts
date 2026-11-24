@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import type { Finding, Pr } from './db.ts';
+import type { Finding, ReviewPr, ReviewThread } from './model.ts';
 import { run } from './util.ts';
 
 export class GithubError extends Error {
@@ -279,19 +279,6 @@ export async function prFiles(repo: string, number: number): Promise<PrFile[]> {
   return out;
 }
 
-/** A review thread as the dashboard shows it next to my review draft. */
-export interface ReviewThread {
-  threadId: string;
-  path: string;
-  line: number | null;
-  /** 1 when the commented line no longer exists at the PR head. */
-  outdated: number;
-  diff_hunk: string | null;
-  resolved: boolean;
-  url: string | null;
-  comments: { author: string; at: string; body: string }[];
-}
-
 /**
  * The threads a review draft is about: the ones I started that are not resolved, whether the draft replies to
  * them or leaves them alone, and any other thread it replies to.
@@ -312,7 +299,7 @@ export function draftThreads(d: Pick<GhPrDetail, 'reviewThreads'>, me: string, r
 }
 
 /** Link to where a review finding points: the diff line, the file line outside the diff, or the thread. */
-export function findingUrl(pr: Pr, f: Finding): string | null {
+export function findingUrl(pr: Pick<ReviewPr, 'url' | 'repo' | 'head_sha' | 'review_draft_sha'>, f: Finding): string | null {
   if (f.kind === 'thread_reply') return f.reply_to_db_id ? `${pr.url}#discussion_r${f.reply_to_db_id}` : null;
   if (!f.path) return null;
   if (f.in_diff) return `${pr.url}/files#diff-${createHash('sha256').update(f.path).digest('hex')}R${f.line}`;
@@ -338,4 +325,19 @@ export function commentableLines(files: PrFile[]): Map<string, Set<number>> {
     out.set(f.filename, lines);
   }
   return out;
+}
+
+export async function resolveThread(threadId: string) {
+  await graphql(
+    `
+      mutation ($id: ID!) {
+        resolveReviewThread(input: { threadId: $id }) {
+          thread {
+            id
+          }
+        }
+      }
+    `,
+    { id: threadId },
+  );
 }

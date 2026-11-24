@@ -1,8 +1,10 @@
 import { readFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { join } from 'node:path';
 import { z } from 'zod';
+import type { Limits } from './batch.ts';
 import { config, extraMcpServers } from './config.ts';
 import type { Db } from './db.ts';
+import type { DeniedCall, NixOnly, Setting } from './model.ts';
 import { bus } from './util.ts';
 
 /**
@@ -391,7 +393,7 @@ export function resetOverride(key: string) {
   bus.emit('settings');
 }
 
-export function describeSettings() {
+export function describeSettings(): Setting[] {
   return (Object.keys(DEFS) as SettingKey[]).map((key) => {
     const d = DEFS[key];
     const o = override(key);
@@ -411,7 +413,7 @@ export function describeSettings() {
 }
 
 /** Values only Home Manager can change, shown read-only on the settings page. */
-export function describeNixOnly() {
+export function describeNixOnly(): NixOnly[] {
   return [
     { label: 'Port', value: String(config.port), option: 'services.pr-manager.port' },
     { label: 'Checkout root', value: config.srcRoot, option: 'services.pr-manager.checkoutRoot' },
@@ -430,17 +432,14 @@ export function inPollWindow(now = new Date()): boolean {
   return setting('pollDays').includes(now.getDay()) && h >= setting('pollFromHour') && h < setting('pollToHour');
 }
 
-const promptPart = (name: string) => readFileSync(join(dirname(config.promptFile), name), 'utf8').trim();
+const promptFile = (name: string) => readFileSync(join(config.promptDir, name), 'utf8').trim();
 
 /** The risk classes, one source for the working agent and the self-review. */
-export const riskClasses = () => promptPart('risk-classes.md').replace('{{SMALL_CHANGE_RUBRIC}}', setting('smallChangeRubric'));
+export const riskClasses = () => promptFile('risk-classes.md').replace('{{SMALL_CHANGE_RUBRIC}}', setting('smallChangeRubric'));
 
-/**
- * The workflow prompt with the configurable rubric, review guidelines and tool allowlist filled in. With
- * autonomy switched on, the rules for classified decisions follow; without it the prompt stays as it was.
- */
-export function workflowPrompt(template = readFileSync(config.promptFile, 'utf8')): string {
-  const base = template
+/** A prompt text with the configurable rubric, review guidelines and tool allowlist filled in. */
+export const fillPrompt = (template: string) =>
+  template
     .replace('{{SMALL_CHANGE_RUBRIC}}', setting('smallChangeRubric'))
     .replace('{{REVIEW_GUIDELINES}}', setting('reviewGuidelines'))
     .replace(
@@ -449,19 +448,30 @@ export function workflowPrompt(template = readFileSync(config.promptFile, 'utf8'
         .map((t) => `- \`${t}\``)
         .join('\n'),
     );
-  if (!setting('autonomy')) return base;
+
+/** The rules for classified decisions, which follow the workflow of my own PRs with the `autonomy` setting. */
+function autonomyPrompt(): string {
   const notes = setting('decisionNotes').trim();
-  const autonomy = promptPart('autonomy.md')
+  return promptFile('autonomy.md')
     .replace('{{RISK_CLASSES}}', riskClasses())
     .replace('{{DECISION_NOTES}}', notes ? `Additional guidance from me:\n\n${notes}` : '')
     .trim();
-  return `${base.trimEnd()}\n\n${autonomy}\n`;
+}
+
+/**
+ * The system prompt of a session: what holds for every PR (`workflow.md`), then the part of the PR's role
+ * (`roleFile`), then, when `autonomy` is given, the rules for deciding alone.
+ */
+export function workflowPrompt(roleFile: string, autonomy = false): string {
+  const parts = [promptFile('workflow.md'), promptFile(roleFile)].map(fillPrompt);
+  if (autonomy) parts.push(autonomyPrompt());
+  return `${parts.join('\n\n')}\n`;
 }
 
 export const selfReviewPrompt = () => setting('selfReviewPrompt').replace('{{RISK_CLASSES}}', riskClasses());
 
 /** What the agent may decide on its own above small changes. */
-export const autonomyLimits = () => ({ contained: setting('autonomyContained'), structural: setting('autonomyStructural') });
+export const autonomyLimits = (): Limits => ({ contained: setting('autonomyContained'), structural: setting('autonomyStructural') });
 
 /** The active days and hours, which also time the veto window. */
 export const activeHours = () => ({ days: setting('pollDays'), from: setting('pollFromHour'), to: setting('pollToHour') });
@@ -475,14 +485,6 @@ export function buildRules(repo: string) {
 }
 
 // --- Denied tool calls, kept for the settings page ---------------------------------------
-
-interface DeniedCall {
-  at: string;
-  pr: string;
-  tool: string;
-  detail: string;
-  rule: string;
-}
 
 /** The narrowest useful allow rule for a denied call: Bash by its first command word. */
 export function proposeRule(tool: string, detail: string): string {

@@ -1,18 +1,21 @@
-import { type SelfReviewResult, addActiveMinutes, batchStatus, replyFor, shouldResolve, vetoApplies } from './batch.ts';
-import { type TaskSource, checkTask, hasProse } from './checklist.ts';
-import { type Comment, type Db, type Pr, now } from './db.ts';
-import { Blocked, Diverged, git, isDirty, localChanged, push, rebaseOntoBase, sync } from './git.ts';
-import { GithubError, findingUrl, graphql, rest, viewer } from './github.ts';
-import { activeHours, setting } from './settings.ts';
-import { changed, errorMessage } from './util.ts';
+import { type TaskSource, checkTask, hasProse } from '../checklist.ts';
+import { type Db, now } from '../db.ts';
+import { Blocked, Diverged, git, isDirty, localChanged, push, rebaseOntoBase, sync } from '../git.ts';
+import { GithubError, resolveThread, rest, viewer } from '../github.ts';
+import type { Comment, Decision, OwnPr, SelfReview } from '../model.ts';
+import { clearNotification } from '../notify.ts';
+import { addActiveMinutes, batchStatus, readyToClose, replyFor, shouldResolve, vetoApplies } from '../batch.ts';
+import { block, submitAnswers } from '../prs.ts';
+import { activeHours, setting } from '../settings.ts';
+import { bus, changed } from '../util.ts';
 
 /**
  * New activity on an open batch: a running veto window starts over, and a failed self-review is retried on
  * what comes next. When the activity is mine, the agent also gets its correction round back.
  */
-function touchBatch(db: Db, prId: number, mine: boolean) {
-  const pr = db.pr(prId)!;
-  db.update('prs', prId, {
+export function touchBatch(db: Db, prId: number, mine: boolean) {
+  const pr = db.pr(prId) as OwnPr;
+  db.updatePr(prId, {
     push_after: null,
     self_review_state: pr.self_review_state === 'failed' ? null : pr.self_review_state,
     ...(mine ? { self_review_round: 0 } : {}),
@@ -21,7 +24,7 @@ function touchBatch(db: Db, prId: number, mine: boolean) {
 
 /** New items on one of my PRs: the batch starts at `headSha` unless one is open, and the agent gets to work. */
 export function openBatch(db: Db, prId: number, headSha: string) {
-  db.update('prs', prId, { last_event_at: now(), batch_head_sha: db.pr(prId)!.batch_head_sha ?? headSha });
+  db.updatePr(prId, { last_event_at: now(), batch_head_sha: (db.pr(prId) as OwnPr).batch_head_sha ?? headSha });
   touchBatch(db, prId, false);
   db.enqueue(prId, 'comments');
   changed(prId);
@@ -32,7 +35,7 @@ export function openBatch(db: Db, prId: number, headSha: string) {
  * one open conflict is enough, since a base that moves on while the agent works is picked up by the
  * same rebase; a rebase failing at batch close always adds one. Returns whether an item was added.
  */
-export function addConflict(db: Db, pr: Pr, headSha: string, baseSha: string, atClose = false): boolean {
+export function addConflict(db: Db, pr: OwnPr, headSha: string, baseSha: string, atClose = false): boolean {
   const comments = db.comments(pr.id);
   if (!atClose && comments.some((c) => c.kind === 'conflict' && ['new', 'proposal', 'accepted', 'fixed'].includes(c.state))) return false;
   const key = `conflict:${headSha}:${baseSha}`;
@@ -53,7 +56,7 @@ export function addConflict(db: Db, pr: Pr, headSha: string, baseSha: string, at
  * them onto the new head. Returns false when the agent already had this very item, so the caller blocks
  * instead of looping.
  */
-export function addDiverged(db: Db, pr: Pr, e: Diverged): boolean {
+export function addDiverged(db: Db, pr: OwnPr, e: Diverged): boolean {
   const key = `diverged:${e.head}:${e.remote}`;
   if (db.comments(pr.id).some((c) => c.gh_key === key)) return false;
   db.insert('comments', {
@@ -71,19 +74,19 @@ export function addDiverged(db: Db, pr: Pr, e: Diverged): boolean {
  * With autonomy, changed code is pushed only after a self-review of exactly this HEAD passed, and a batch
  * the agent decided alone waits out the veto window on top. Returns whether the push may go ahead.
  */
-async function pushAllowed(db: Db, pr: Pr, path: string): Promise<boolean> {
+async function pushAllowed(db: Db, pr: OwnPr, path: string): Promise<boolean> {
   const head = await git(path, ['rev-parse', 'HEAD']);
   if (pr.self_review_sha !== head || !pr.self_review_state) {
-    db.update('prs', pr.id, { self_review_sha: head, self_review_state: null, self_review_result: null, push_after: null });
+    db.updatePr(pr.id, { self_review_sha: head, self_review_state: null, self_review_result: null, push_after: null });
     db.enqueue(pr.id, 'self_review');
     changed(pr.id);
     return false;
   }
   if (pr.self_review_state !== 'passed') return false;
   if (pr.push_after) return Date.parse(pr.push_after) <= Date.now();
-  const review = pr.self_review_result ? (JSON.parse(pr.self_review_result) as SelfReviewResult) : null;
+  const review = pr.self_review_result ? (JSON.parse(pr.self_review_result) as SelfReview) : null;
   if (!setting('vetoMinutes') || !vetoApplies(db.comments(pr.id), review)) return true;
-  db.update('prs', pr.id, { push_after: addActiveMinutes(new Date(), setting('vetoMinutes'), activeHours()).toISOString() });
+  db.updatePr(pr.id, { push_after: addActiveMinutes(new Date(), setting('vetoMinutes'), activeHours()).toISOString() });
   changed(pr.id);
   return false;
 }
@@ -94,7 +97,7 @@ const quote = (c: Comment) =>
     ? `> - [ ] ${c.task}\n\n`
     : `> @${c.author ?? 'ghost'}: ${c.body.split('\n').slice(0, 3).join(' ').slice(0, 200)}${c.body.length > 200 ? '…' : ''}\n\n`;
 
-async function postReply(pr: Pr, c: Comment, text: string) {
+async function postReply(pr: OwnPr, c: Comment, text: string) {
   if (c.kind === 'thread' && c.reply_to_db_id) {
     await rest('POST', `/repos/${pr.repo}/pulls/${pr.number}/comments/${c.reply_to_db_id}/replies`, {
       body: (c.task ? quote(c) : '') + text,
@@ -104,7 +107,7 @@ async function postReply(pr: Pr, c: Comment, text: string) {
   }
 }
 
-function sourcePath(pr: Pr, s: TaskSource) {
+function sourcePath(pr: OwnPr, s: TaskSource) {
   if (s.type === 'issue_comment') return `/repos/${pr.repo}/issues/comments/${s.id}`;
   if (s.type === 'review_comment') return `/repos/${pr.repo}/pulls/comments/${s.id}`;
   return `/repos/${pr.repo}/pulls/${pr.number}/reviews/${s.id}`;
@@ -114,11 +117,11 @@ function sourcePath(pr: Pr, s: TaskSource) {
  * Settles a checklist item: a fixed line gets its box checked, which is the whole answer unless the
  * comment has prose around its checklist; a skip with a reason is a reply, and the box stays open.
  */
-async function settleTask(pr: Pr, c: Comment, me: string) {
+async function settleTask(pr: OwnPr, c: Comment, me: string) {
   const source = JSON.parse(c.task_source!) as TaskSource;
   const path = sourcePath(pr, source);
   const { body } = await rest<{ body: string }>('GET', path);
-  let text = replyFor(c, me);
+  let text = replyFor(c, me, setting('replyHeader'));
   if (c.state === 'fixed' && !c.clarify) {
     const checked = checkTask(body ?? '', c.task!);
     let boxChecked = checked === null; // edited away or checked by someone else: nothing to check
@@ -132,24 +135,9 @@ async function settleTask(pr: Pr, c: Comment, me: string) {
       }
     }
     if (boxChecked && !hasProse(body ?? '')) text = null;
-    else if (!boxChecked) text ??= replyFor({ ...c, reply_draft: 'Done.' }, me);
+    else if (!boxChecked) text ??= replyFor({ ...c, reply_draft: 'Done.' }, me, setting('replyHeader'));
   }
   if (text) await postReply(pr, c, text);
-}
-
-async function resolveThread(threadId: string) {
-  await graphql(
-    `
-      mutation ($id: ID!) {
-        resolveReviewThread(input: { threadId: $id }) {
-          thread {
-            id
-          }
-        }
-      }
-    `,
-    { id: threadId },
-  );
 }
 
 /**
@@ -157,10 +145,10 @@ async function resolveThread(threadId: string) {
  * no longer in the worktree go back to the agent, which checks whether the new head covers them.
  * Returns whether items were reopened.
  */
-export async function adoptBatchHead(db: Db, pr: Pr, sha: string, path: string): Promise<boolean> {
-  db.update('prs', pr.id, { batch_head_sha: sha, head_sha: sha });
+export async function adoptBatchHead(db: Db, pr: OwnPr, sha: string, path: string): Promise<boolean> {
+  db.updatePr(pr.id, { batch_head_sha: sha, head_sha: sha });
   let reopened = false;
-  if (!(await localChanged(db.pr(pr.id)!, path))) {
+  if (!(await localChanged(db.pr(pr.id) as OwnPr, path))) {
     for (const c of db.comments(pr.id).filter((x) => x.state === 'fixed')) {
       db.update('comments', c.id, { state: c.auto ? 'new' : 'accepted', note: 'The branch was pushed to meanwhile; checked again.' });
       reopened = true;
@@ -179,13 +167,13 @@ const REMARKS = new Set(['thread', 'issue_comment', 'review_body']);
  * for the old head may be settled now, so open proposals go back to triage and the agent looks at its open
  * questions again. Returns whether the agent has work.
  */
-export function recheckAfterPush(db: Db, pr: Pr): boolean {
+export function recheckAfterPush(db: Db, pr: OwnPr): boolean {
   const proposals = db.comments(pr.id).filter((c) => c.state === 'proposal' && REMARKS.has(c.kind));
   if (!proposals.length && !db.questions(pr.id).some((q) => q.state === 'open')) return false;
   db.transaction(() => {
     for (const c of proposals)
       db.update('comments', c.id, { state: 'new', decision: null, note: 'The branch was pushed to meanwhile; checked again.' });
-    db.update('prs', pr.id, { last_event_at: now() });
+    db.updatePr(pr.id, { last_event_at: now() });
     db.enqueue(pr.id, 'comments', { pushed: true });
   });
   changed(pr.id);
@@ -199,8 +187,9 @@ const gone = (e: unknown) =>
  * Closes a complete batch on one of my PRs: re-checks GitHub, rebases, pushes once with
  * force-with-lease, then posts replies and resolves threads. Safe to re-run after a failure.
  */
-export async function closeBatch(ctx: { db: Db; pr: Pr; ingest: (pr: Pr) => Promise<number>; block: (reason: string) => void }) {
+export async function closeBatch(ctx: { db: Db; pr: OwnPr; ingest: (pr: OwnPr) => Promise<number> }) {
   const { db } = ctx;
+  const blocked = (reason: string) => block(db, ctx.pr, reason);
   let pr = ctx.pr;
   if (await ctx.ingest(pr)) return; // new activity joins the batch
   if (
@@ -215,12 +204,12 @@ export async function closeBatch(ctx: { db: Db; pr: Pr; ingest: (pr: Pr) => Prom
   if (!path) throw new Error('No worktree for this PR.');
   try {
     if (await isDirty(path)) throw new Blocked(`${path} has uncommitted changes at batch close.`);
-    const moved = await sync(pr, path);
+    const moved = await sync(pr, path, { mine: true, batchStart: pr.batch_head_sha });
     if (moved && (await adoptBatchHead(db, pr, moved, path))) return; // reopened items need the agent first
-    pr = db.pr(pr.id)!;
+    pr = db.pr(pr.id) as OwnPr;
   } catch (e) {
-    if (e instanceof Diverged) return addDiverged(db, pr, e) ? undefined : ctx.block(e.message);
-    if (e instanceof Blocked) return ctx.block(e.message);
+    if (e instanceof Diverged) return addDiverged(db, pr, e) ? undefined : blocked(e.message);
+    if (e instanceof Blocked) return blocked(e.message);
     throw e;
   }
 
@@ -230,18 +219,18 @@ export async function closeBatch(ctx: { db: Db; pr: Pr; ingest: (pr: Pr) => Prom
       const head = await git(path, ['rev-parse', 'HEAD']);
       const base = await git(path, ['rev-parse', `refs/remotes/origin/${pr.base_ref}`]);
       if (!addConflict(db, pr, head, base, true))
-        ctx.block(`Rebasing onto ${pr.base_ref} fails again at the same commits. Resolve it in ${path}, then press Retry.`);
+        blocked(`Rebasing onto ${pr.base_ref} fails again at the same commits. Resolve it in ${path}, then press Retry.`);
       return;
     }
     const newSha = await push(pr, path, pr.batch_head_sha ?? pr.head_sha);
     const ciFixed = db.comments(pr.id).some((c) => c.kind === 'ci' && c.state === 'fixed');
-    db.update('prs', pr.id, {
+    db.updatePr(pr.id, {
       batch_head_sha: newSha,
       head_sha: newSha,
       dirty_by_agent: 0,
       ci_attempts: pr.ci_attempts + (ciFixed ? 1 : 0),
     });
-    pr = db.pr(pr.id)!;
+    pr = db.pr(pr.id) as OwnPr;
   }
 
   const me = await viewer();
@@ -251,10 +240,10 @@ export async function closeBatch(ctx: { db: Db; pr: Pr; ingest: (pr: Pr) => Prom
       if (c.task) {
         await settleTask(pr, c, me);
       } else {
-        const text = replyFor(c, me);
+        const text = replyFor(c, me, setting('replyHeader'));
         if (text) await postReply(pr, c, text);
       }
-      if (shouldResolve(c, all)) await resolveThread(c.thread_id!);
+      if (shouldResolve(c, all, setting('resolveThreads'))) await resolveThread(c.thread_id!);
       db.update('comments', c.id, { state: 'done' });
     } catch (e) {
       if (!gone(e)) throw e;
@@ -262,7 +251,7 @@ export async function closeBatch(ctx: { db: Db; pr: Pr; ingest: (pr: Pr) => Prom
     }
     changed(pr.id);
   }
-  db.update('prs', pr.id, {
+  db.updatePr(pr.id, {
     batch_head_sha: null,
     self_review_sha: null,
     self_review_state: null,
@@ -274,17 +263,15 @@ export async function closeBatch(ctx: { db: Db; pr: Pr; ingest: (pr: Pr) => Prom
 }
 
 export interface SubmitInput {
-  comments?: { id: number; action: Action; proposal?: string; replyDraft?: string }[];
+  comments?: { id: number; action: Decision; proposal?: string; replyDraft?: string }[];
   answers?: { id: number; answer: string }[];
 }
-
-type Action = 'accept' | 'reject' | 'reply' | 'skip';
 
 /**
  * Settles one proposal. A reply I typed is posted as written; without one, the agent writes it, guided by the
  * proposal text. Returns whether the agent has work to do for it.
  */
-function decide(db: Db, c: Comment, action: Action, proposal: string | null, replyDraft: string | null, byAgent = false): boolean {
+function decide(db: Db, c: Comment, action: Decision, proposal: string | null, replyDraft: string | null, byAgent = false): boolean {
   const reply = replyDraft?.trim() || null;
   const base = { proposal, auto: 0, decision: action, by_agent: byAgent ? 1 : 0 };
   if (action === 'skip') {
@@ -307,7 +294,7 @@ function decide(db: Db, c: Comment, action: Action, proposal: string | null, rep
 }
 
 /** My decisions on proposals and answers to questions, submitted at once like a review. */
-export function submitDecisions(db: Db, pr: Pr, input: SubmitInput) {
+export function submitDecisions(db: Db, pr: OwnPr, input: SubmitInput) {
   let needsAgent = false;
   db.transaction(() => {
     for (const d of input.comments ?? []) {
@@ -315,13 +302,8 @@ export function submitDecisions(db: Db, pr: Pr, input: SubmitInput) {
       if (!c || c.pr_id !== pr.id || c.state !== 'proposal') continue;
       if (decide(db, c, d.action, d.proposal ?? c.proposal, d.replyDraft ?? null)) needsAgent = true;
     }
-    for (const a of input.answers ?? []) {
-      const q = db.get<{ id: number; pr_id: number; state: string }>('SELECT id, pr_id, state FROM questions WHERE id = ?', a.id);
-      if (!q || q.pr_id !== pr.id || q.state !== 'open' || !a.answer.trim()) continue;
-      db.update('questions', q.id, { answer: a.answer.trim(), state: 'answered' });
-      needsAgent = true;
-    }
-    db.update('prs', pr.id, { last_event_at: now() });
+    if (submitAnswers(db, pr, input.answers)) needsAgent = true;
+    db.updatePr(pr.id, { last_event_at: now() });
     touchBatch(db, pr.id, true);
     if (needsAgent) db.enqueue(pr.id, 'answers');
   });
@@ -335,7 +317,7 @@ export function submitDecisions(db: Db, pr: Pr, input: SubmitInput) {
  * Once nothing waits for me any more, the agent's pre-decisions take effect together, so all fixes of a round
  * land in one run and one push. Returns whether they did. `byAgent` records that I did not submit them.
  */
-export function applyPredecisions(db: Db, pr: Pr, byAgent = true): boolean {
+export function applyPredecisions(db: Db, pr: OwnPr, byAgent = true): boolean {
   const proposals = db.comments(pr.id).filter((c) => c.state === 'proposal');
   if (!proposals.length || proposals.some((c) => !c.decision) || db.questions(pr.id).some((q) => q.state === 'open')) return false;
   db.transaction(() => {
@@ -346,87 +328,31 @@ export function applyPredecisions(db: Db, pr: Pr, byAgent = true): boolean {
   return true;
 }
 
-/** Free-text instruction from the PR page; it becomes work for the session. */
-export function addInstruction(db: Db, pr: Pr, text: string) {
-  db.insert('comments', {
-    pr_id: pr.id,
-    kind: 'instruction',
-    gh_key: `instruction:${Date.now()}`,
-    author: 'me',
-    body: text,
-    state: 'accepted',
-  });
-  db.update('prs', pr.id, { last_event_at: now(), ...(pr.role === 'own' && !pr.batch_head_sha ? { batch_head_sha: pr.head_sha } : {}) });
-  touchBatch(db, pr.id, true);
-  db.enqueue(pr.id, 'answers');
-  changed(pr.id);
-}
-
-/**
- * Queues a new review of a PR I review: a follow-up once I submitted a review, a full review before that.
- * `reason` is set when the daemon starts it by itself (see `reReviewReason`).
- */
-export function enqueueReReview(db: Db, pr: Pr, reason?: 'reRequested' | 'pushed') {
-  db.enqueue(pr.id, pr.reviewed_sha ? 'followup_review' : 'review', reason ? { [reason]: true } : undefined);
-  changed(pr.id);
-}
-
-/** A thread holds at most one reply draft: a later one replaces it, so no outdated reply is left to submit. */
-export function draftThreadReply(
-  db: Db,
-  prId: number,
-  reply: { thread_id: string; reply_to_db_id: number; path: string | null; line: number | null; body: string; resolve: boolean },
-) {
-  db.transaction(() => {
-    db.run(`DELETE FROM findings WHERE pr_id = ? AND kind = 'thread_reply' AND thread_id = ? AND state = 'draft'`, prId, reply.thread_id);
-    db.insert('findings', { pr_id: prId, kind: 'thread_reply', ...reply, resolve: reply.resolve ? 1 : 0 });
-  });
-}
-
-export interface ReviewInput {
-  verdict: 'APPROVE' | 'REQUEST_CHANGES' | 'COMMENT';
-  body: string;
-  findings: { id: number; body: string; skip: boolean }[];
-}
-
-/** Posts the review draft as one GitHub review, then the drafted thread replies, and resolves the threads they settle. */
-export async function submitReview(db: Db, pr: Pr, input: ReviewInput) {
-  if (pr.review_state !== 'draft') throw new Error('There is no review draft to submit.');
-  const edits = new Map(input.findings.map((f) => [f.id, f]));
-  const all = db.findings(pr.id).filter((f) => f.state === 'draft');
-  const kept = all.filter((f) => !edits.get(f.id)?.skip).map((f) => ({ ...f, body: edits.get(f.id)?.body ?? f.body }));
-  const inline = kept.filter((f) => f.kind === 'finding' && f.in_diff);
-  const outside = kept.filter((f) => f.kind === 'finding' && !f.in_diff);
-  const replies = kept.filter((f) => f.kind === 'thread_reply');
-  const body = [input.body.trim(), ...outside.map((f) => `**[${f.path}:${f.line}](${findingUrl(pr, f)})**: ${f.body}`)]
-    .filter(Boolean)
-    .join('\n\n');
-  const commit = pr.review_draft_sha ?? pr.head_sha;
-
-  if (inline.length || body || input.verdict !== 'COMMENT') {
-    await rest('POST', `/repos/${pr.repo}/pulls/${pr.number}/reviews`, {
-      commit_id: commit,
-      event: input.verdict,
-      body,
-      comments: inline.map((f) => ({ path: f.path, line: f.line, side: 'RIGHT', body: f.body })),
-    });
+/** Enqueues `close_batch` for every own PR whose batch is complete and quiet. */
+export function checkBatches(db: Db) {
+  const rules = { quietMs: setting('batchQuietMinutes') * 60_000, autonomy: setting('autonomy') };
+  for (const pr of db.prsWhere(`role = 'own' AND state = 'open'`) as OwnPr[]) {
+    const status = batchStatus(db.comments(pr.id), db.questions(pr.id), db.workItems(pr.id));
+    if (readyToClose(pr, status, rules)) {
+      db.enqueue(pr.id, 'close_batch');
+      bus.emit('wake');
+    }
   }
-  for (const r of replies) {
-    await rest('POST', `/repos/${pr.repo}/pulls/${pr.number}/comments/${r.reply_to_db_id}/replies`, { body: r.body });
-    // The reply is posted and says why; a thread GitHub does not let me resolve stays open for the author.
-    if (r.resolve && r.thread_id)
-      await resolveThread(r.thread_id).catch((e) => console.warn(`resolve thread on ${pr.repo}#${pr.number}: ${errorMessage(e)}`));
-  }
-  db.transaction(() => {
-    for (const f of all) db.update('findings', f.id, { state: edits.get(f.id)?.skip ? 'skipped' : 'submitted' });
-    db.update('prs', pr.id, {
-      review_state: 'submitted',
-      review_verdict: input.verdict,
-      review_body: input.body,
-      reviewed_sha: commit,
-      reviewed_at: now(),
-      review_out_of_date: commit === pr.head_sha ? 0 : 1,
-    });
-  });
+}
+
+/** Ends the veto window, and lets a batch through whose self-review did not pass. */
+export function pushNow(db: Db, pr: OwnPr) {
+  if (pr.self_review_state !== 'failed' && !pr.push_after) throw new Error('Nothing waits for my go-ahead.');
+  db.updatePr(pr.id, { self_review_state: 'passed', push_after: now() });
+  clearNotification(`self-review:${pr.id}`);
   changed(pr.id);
+  checkBatches(db);
+}
+
+export function retrySelfReview(db: Db, pr: OwnPr) {
+  if (pr.self_review_state !== 'failed') throw new Error('There is no failed self-review to repeat.');
+  db.updatePr(pr.id, { self_review_state: null, self_review_result: null, self_review_round: 0 });
+  clearNotification(`self-review:${pr.id}`);
+  changed(pr.id);
+  checkBatches(db);
 }

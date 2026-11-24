@@ -5,16 +5,15 @@ import { createPoller } from './poller.ts';
 import { createRunner } from './runner.ts';
 import { initSettings } from './settings.ts';
 
-const dashboardUrl = `http://127.0.0.1:${config.port}`;
 const db = openDb();
 initSettings(db);
 
-const poller = createPoller({ db, dashboardUrl });
-const runner = createRunner({ db, poller, dashboardUrl });
+const poller = createPoller({ db });
+const runner = createRunner({ db });
 
 runner.recover();
 const server = createHttp({ db, poller, runner });
-server.listen(config.port, '127.0.0.1', () => console.log(`pr-manager listening on ${dashboardUrl}`));
+server.listen(config.port, '127.0.0.1', () => console.log(`pr-manager listening on ${config.dashboardUrl}`));
 poller.start();
 runner.start();
 
