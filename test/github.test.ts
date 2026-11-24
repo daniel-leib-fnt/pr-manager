@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { createHash } from 'node:crypto';
-import { type GhPr, buildState, commentableLines, failedChecks, findingUrl, readyToMerge } from '../server/github.ts';
+import { type GhPr, buildState, commentableLines, draftThreads, failedChecks, findingUrl, readyToMerge } from '../server/github.ts';
 
 test('commentable lines follow the right side of each hunk', () => {
   const patch = ['@@ -1,3 +1,4 @@', ' a', '-b', '+B', '+C', ' d', '@@ -10,2 +11,2 @@', ' x', '-y', '+Y'].join('\n');
@@ -11,6 +11,36 @@ test('commentable lines follow the right side of each hunk', () => {
 
 test('files without a patch have no commentable lines', () => {
   assert.equal(commentableLines([{ filename: 'bin.png', status: 'added' }]).get('bin.png')!.size, 0);
+});
+
+test('the threads of a draft are my unresolved ones and those it replies to', () => {
+  const thread = (id: string, author: string, isResolved: boolean, line: number | null = 3) => ({
+    id,
+    isResolved,
+    path: 'a.kt',
+    line,
+    originalLine: 7,
+    comments: { nodes: [{ id: 'c', databaseId: 1, author: { login: author }, body: 'b', createdAt: 't', url: 'u', diffHunk: 'h' }] },
+  });
+  const d = {
+    reviewThreads: {
+      nodes: [
+        thread('mine', 'me', false, null),
+        thread('done', 'me', true),
+        thread('theirs', 'bob', false),
+        thread('replied', 'bob', true),
+      ],
+    },
+  };
+  const threads = draftThreads(d, 'me', new Set(['replied']));
+  assert.deepEqual(
+    threads.map((t) => [t.threadId, t.line, t.outdated, t.resolved]),
+    [
+      ['mine', 7, 1, false],
+      ['replied', 3, 0, true],
+    ],
+  );
+  assert.deepEqual(threads[0].comments, [{ author: 'me', at: 't', body: 'b' }]);
 });
 
 test('finding links point to the diff line, the file line, or the thread', () => {

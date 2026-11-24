@@ -8,6 +8,7 @@ import { runnable } from './batch.ts';
 import { config, extraMcpServers } from './config.ts';
 import { type Db, type Pr, type WorkItem, type WorkKind, now } from './db.ts';
 import { Blocked, ensureWorktree, fetchBase, git, interactiveSessionsIn, isDirty, sync } from './git.ts';
+import { draftThreads, prDetail, viewer } from './github.ts';
 import type { Poller } from './poller.ts';
 import { isExcluded, recordDenied, setting, workflowPrompt } from './settings.ts';
 import { bus, changed, errorMessage, notify } from './util.ts';
@@ -298,11 +299,28 @@ export function createRunner({ db, poller, dashboardUrl }: RunnerDeps) {
       // The draft is submitted for the commit the agent last looked at, or GitHub rejects findings on files added since.
       if (!reviewRun && reviewDrafted && current.role === 'review')
         db.update('prs', pr.id, { review_draft_sha: await git(path, ['rev-parse', 'HEAD']) });
+      if (current.role === 'review' && (reviewRun || reviewDrafted)) await snapshotThreads(current);
       afterRun(db.pr(pr.id)!, kinds, openAtStart, reviewDrafted);
     } else {
       notify('error', `Agent error: ${pr.repo}#${pr.number}`, error.slice(0, 300), prUrl(pr), `agent-error:${pr.id}`);
     }
     changed(pr.id);
+  }
+
+  /** Keeps the threads the review draft is about, so the dashboard shows what a reply answers and which threads got none. */
+  async function snapshotThreads(pr: Pr) {
+    try {
+      const replied = new Set(
+        db
+          .findings(pr.id)
+          .filter((f) => f.state === 'draft' && f.thread_id)
+          .map((f) => f.thread_id!),
+      );
+      const threads = draftThreads(await prDetail(pr.repo, pr.number), await viewer(), replied);
+      db.update('prs', pr.id, { review_threads: JSON.stringify(threads) });
+    } catch (e) {
+      console.warn(`threads of ${pr.repo}#${pr.number}: ${errorMessage(e)}`);
+    }
   }
 
   /** Compacts the session; a failure only costs a larger context on the next run. */

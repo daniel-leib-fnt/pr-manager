@@ -1,7 +1,7 @@
 import { DatePipe, NgTemplateOutlet } from '@angular/common';
 import { Component, computed, effect, inject, input, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import { Api, type Comment, type Finding, type PrDetail, type Question } from './api';
+import { Api, type Comment, type Finding, type PrDetail, type Question, type ReviewThread } from './api';
 import { Ci } from './ci';
 import { CodeExcerpt } from './code-excerpt';
 import { plural } from './pr-view';
@@ -586,6 +586,26 @@ function saveDraft(id: number, draft: Draft) {
         }
       </ng-template>
 
+      <ng-template #threadTpl let-t>
+        @if (t.excerpt) {
+          <app-code-excerpt [excerpt]="t.excerpt" [path]="t.path" />
+        }
+        <div class="conversation">
+          @for (m of t.comments; track $index) {
+            <div class="bubble">
+              <span class="avatar">{{ m.author.slice(0, 2) }}</span>
+              <div class="bubble-body">
+                <div class="bubble-meta">
+                  <strong>{{ m.author }}</strong>
+                  · {{ m.at | date: 'dd.MM. HH:mm' }}
+                </div>
+                <p class="bubble-text">{{ m.body }}</p>
+              </div>
+            </div>
+          }
+        </div>
+      </ng-template>
+
       <ng-template #reviewTpl>
         <section class="card">
           <h2>What this PR does</h2>
@@ -635,7 +655,9 @@ function saveDraft(id: number, draft: Draft) {
                 </div>
               } @else {
                 <div class="dcard-body">
-                  @if (f.excerpt && f.path) {
+                  @if (threadOf(f); as t) {
+                    <ng-container *ngTemplateOutlet="threadTpl; context: { $implicit: t }" />
+                  } @else if (f.excerpt && f.path) {
                     <app-code-excerpt [excerpt]="f.excerpt" [path]="f.path" />
                   }
                   <textarea
@@ -649,6 +671,30 @@ function saveDraft(id: number, draft: Draft) {
             </article>
           } @empty {
             <p class="muted">No findings.</p>
+          }
+          @if (unansweredThreads().length) {
+            <div class="list-head">
+              <h2>My open threads without a reply</h2>
+              <span>{{ unansweredThreads().length }} still open, left as they are</span>
+            </div>
+            @for (t of unansweredThreads(); track t.threadId) {
+              <article class="dcard">
+                <div class="dcard-head">
+                  <span class="path" [title]="t.path + ':' + t.line">
+                    <bdi>
+                      {{ t.path }}
+                      <strong>:{{ t.line }}</strong>
+                    </bdi>
+                  </span>
+                  @if (t.url) {
+                    <a [href]="t.url" target="_blank" rel="noopener" class="small">View on GitHub ↗</a>
+                  }
+                </div>
+                <div class="dcard-body">
+                  <ng-container *ngTemplateOutlet="threadTpl; context: { $implicit: t }" />
+                </div>
+              </article>
+            }
           }
         } @else if (d.pr.review_state === 'submitted') {
           <section class="card">
@@ -840,6 +886,17 @@ export class PrPage {
     if (c.note?.startsWith('Dismissed')) return { text: 'Dismissed', cls: '' };
     return { text: 'Done', cls: '' };
   }
+
+  /** The thread a reply draft answers. */
+  protected threadOf(f: Finding): ReviewThread | undefined {
+    return f.thread_id ? this.data()?.threads.find((t) => t.threadId === f.thread_id) : undefined;
+  }
+
+  /** My unresolved threads the draft does not reply to: the agent judged them as still open, with nothing to answer. */
+  protected readonly unansweredThreads = computed(() => {
+    const replied = new Set(this.draftFindings().map((f) => f.thread_id));
+    return (this.data()?.threads ?? []).filter((t) => !t.resolved && !replied.has(t.threadId));
+  });
 
   protected conversation(c: Comment) {
     return messages(c);

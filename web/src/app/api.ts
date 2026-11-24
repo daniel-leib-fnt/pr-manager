@@ -85,6 +85,7 @@ export interface Question {
 export interface Finding {
   id: number;
   kind: 'finding' | 'thread_reply';
+  thread_id: string | null;
   path: string | null;
   line: number | null;
   in_diff: number;
@@ -93,6 +94,17 @@ export interface Finding {
   body: string;
   state: 'draft' | 'skipped' | 'submitted';
   url: string | null;
+  excerpt: Excerpt | null;
+}
+
+/** A review thread my review draft is about, as it was when the agent last wrote to the draft. */
+export interface ReviewThread {
+  threadId: string;
+  path: string;
+  line: number | null;
+  resolved: boolean;
+  url: string | null;
+  comments: { author: string; at: string; body: string }[];
   excerpt: Excerpt | null;
 }
 
@@ -110,6 +122,7 @@ export interface PrDetail {
   comments: Comment[];
   questions: Question[];
   findings: Finding[];
+  threads: ReviewThread[];
   work: WorkItem[];
 }
 
