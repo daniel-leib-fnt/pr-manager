@@ -91,7 +91,9 @@ in
         minSuccessfulChecksPerRepo ({ "owner/repo" = 3; }), reviewWaitForGreenBuild,
         autoFollowupOnReRequest, reviewGuidelines, smallChangeRubric, maxCiAttempts,
         batchQuietMinutes, resolveThreads ("fixed_and_skipped_with_reason",
-        "fixed", "never"), replyHeader ({viewer} is replaced), autoRemoveMergedWorktrees, allowedTools,
+        "fixed", "never"), replyHeader ({viewer} is replaced), autoRemoveMergedWorktrees, autonomy,
+        autonomyContained and autonomyStructural ("never", "high", "medium", "low"), vetoMinutes,
+        decisionNotes, selfReviewPrompt ({{RISK_CLASSES}} is replaced), selfReviewModel, allowedTools,
         maxParallelSessions, model, maxTurns, maxBudgetUsd, notify ("input", "review_draft",
         "blocked", "error"). Unknown keys and invalid values are logged and ignored.
       '';

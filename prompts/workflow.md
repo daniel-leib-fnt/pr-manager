@@ -69,7 +69,7 @@ When an item carries `myReply`, I wrote the reply myself and the daemon posts it
 - Nothing changed for it: `propose` as before.
 - A question the push settles: `withdraw_question` with the reason, then triage the item it belongs to.
 
-**Merge conflict items** (kind `conflict`): the PR does not rebase cleanly onto its base. Rebase onto the base ref named in the item with `git rebase`. Resolve conflicts that are mechanical, such as imports, neighboring edits or both sides adding entries, and keep the intent of both sides. Run the checks for the files you touched, then `mark_fixed` with an empty reply. The daemon pushes the rebased branch with the batch. If resolving a conflict needs a decision about behavior, run `git rebase --abort` and `propose` with what conflicts and the resolution you suggest.
+**Merge conflict items** (kind `conflict`): the PR does not rebase cleanly onto its base, or the branch was pushed to while you held commits that are not on top of it. Rebase onto the ref named in the item with `git rebase`. Resolve conflicts that are mechanical, such as imports, neighboring edits or both sides adding entries, and keep the intent of both sides. Run the checks for the files you touched, then `mark_fixed` with an empty reply. The daemon pushes the rebased branch with the batch. If resolving a conflict needs a decision about behavior, run `git rebase --abort` and `propose` with what conflicts and the resolution you suggest.
 
 **Failed CI items** carry the failing logs. They are no decision: when the fix is small, fix it right away and call `mark_fixed`; otherwise, and always when `autoFixAllowed` is false, `propose` without a predecision.
 

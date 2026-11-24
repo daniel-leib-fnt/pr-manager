@@ -56,6 +56,7 @@ test('pre-decisions wait while anything is open, then take effect together', () 
   assert.equal(db.comment(accept)!.state, 'accepted', 'applied together with my decision');
   assert.equal(db.comment(accept)!.decision, 'accept');
   assert.equal(db.comment(skip)!.state, 'skipped', 'a skip needs no agent');
+  assert.equal(db.comment(accept)!.by_agent, 0, 'I submitted the batch, so its pre-decisions count as mine');
   assert.equal(db.workItems(id).filter((w) => w.kind === 'answers' && w.state === 'queued').length, 1);
 });
 
@@ -152,4 +153,38 @@ test('a push from outside makes the agent look at its open questions again', () 
   db.insert('questions', { pr_id: id, question: 'q' });
   assert.equal(recheckAfterPush(db, db.pr(id)!), true);
   assert.equal(db.workItems(id).length, 1);
+});
+
+test("pre-decisions that take effect without me are the agent's, and new activity restarts the veto window", () => {
+  const db = openDb(':memory:');
+  const id = db.insert('prs', {
+    url: 'u',
+    repo: 'o/r',
+    number: 1,
+    title: 't',
+    author: 'me',
+    role: 'own',
+    head_ref: 'h',
+    head_sha: 'a1',
+    base_ref: 'main',
+    push_after: '2026-11-24T12:00:00Z',
+    self_review_state: 'failed',
+    self_review_round: 1,
+  });
+  const c = db.insert('comments', {
+    pr_id: id,
+    kind: 'thread',
+    gh_key: 'k',
+    body: 'b',
+    state: 'proposal',
+    proposal: 'p',
+    decision: 'accept',
+  });
+  assert.equal(applyPredecisions(db, db.pr(id)!), true);
+  assert.equal(db.comment(c)!.by_agent, 1);
+
+  addConflict(db, db.pr(id)!, 'a1', 'b1');
+  assert.equal(db.pr(id)!.push_after, null);
+  assert.equal(db.pr(id)!.self_review_state, null, 'a failed review is retried on what comes next');
+  assert.equal(db.pr(id)!.self_review_round, 1, 'activity that is not mine gives no new correction round');
 });

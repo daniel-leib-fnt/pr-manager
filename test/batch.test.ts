@@ -1,6 +1,18 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { batchStatus, reReviewReason, readyToClose, replyFor, shouldResolve } from '../server/batch.ts';
+import {
+  type SelfReviewResult,
+  addActiveMinutes,
+  batchAutonomy,
+  batchStatus,
+  mayDecide,
+  reReviewReason,
+  readyToClose,
+  replyFor,
+  reviewOutcome,
+  shouldResolve,
+  vetoApplies,
+} from '../server/batch.ts';
 import type { Comment, Pr, Question, WorkItem } from '../server/db.ts';
 
 const comment = (over: Partial<Comment>): Comment => ({
@@ -25,6 +37,10 @@ const comment = (over: Partial<Comment>): Comment => ({
   skip_reason: null,
   decision: null,
   auto: 0,
+  risk: null,
+  confidence: null,
+  reason: null,
+  by_agent: 0,
   note: null,
   task: null,
   task_source: null,
@@ -135,4 +151,65 @@ test('a new review starts on a re-request, and on a push only while my draft ans
 
 test('a withdrawn question does not keep the batch open', () => {
   assert.equal(batchStatus([comment({ state: 'fixed' })], [question('withdrawn')], []), 'closable');
+});
+
+const limits = { contained: 'medium', structural: 'never' } as const;
+
+test("small changes are always the agent's to decide, anything above only within my limits", () => {
+  assert.equal(mayDecide('local', 'low', limits), true);
+  assert.equal(mayDecide('contained', 'high', limits), true);
+  assert.equal(mayDecide('contained', 'medium', limits), true);
+  assert.equal(mayDecide('contained', 'low', limits), false);
+  assert.equal(mayDecide('structural', 'high', limits), false);
+  assert.equal(mayDecide('contained', 'high', { contained: 'never', structural: 'never' }), false, 'the default allows nothing new');
+});
+
+test('a batch is autonomous only when I submitted none of its pending items', () => {
+  const agent = comment({ state: 'fixed', by_agent: 1, risk: 'contained' });
+  const small = comment({ id: 2, state: 'fixed', by_agent: 1, risk: 'local' });
+  const ci = comment({ id: 3, kind: 'ci', state: 'fixed', auto: 1 });
+  const mine = comment({ id: 4, state: 'fixed' });
+  assert.deepEqual(batchAutonomy([agent, ci]), { autonomous: true, aboveLocal: true });
+  assert.deepEqual(batchAutonomy([small, ci]), { autonomous: true, aboveLocal: false });
+  assert.equal(batchAutonomy([agent, mine]).autonomous, false);
+  assert.equal(batchAutonomy([comment({ state: 'done', by_agent: 1 })]).autonomous, false, 'nothing pending');
+});
+
+test('a self-review passes, sends findings back once, or waits for me', () => {
+  const review = (over: Partial<SelfReviewResult>): SelfReviewResult => ({
+    riskClass: 'local',
+    verdict: 'pass',
+    summary: 's',
+    findings: [],
+    ...over,
+  });
+  assert.equal(reviewOutcome(undefined, 0, true, limits).state, 'failed', 'no result never counts as passed');
+  assert.equal(reviewOutcome(review({}), 0, true, limits).state, 'passed');
+  assert.equal(reviewOutcome(review({ riskClass: 'contained' }), 0, true, limits).state, 'passed');
+  assert.equal(reviewOutcome(review({ riskClass: 'structural' }), 0, true, limits).state, 'failed', 'above what the agent may decide');
+  assert.equal(reviewOutcome(review({ riskClass: 'structural' }), 0, false, limits).state, 'passed', 'my own decisions have no limit');
+  const changes = review({ verdict: 'changes', route: 'auto-fixable', findings: [{ body: 'b' }] });
+  assert.equal(reviewOutcome(changes, 0, true, limits).state, 'fix');
+  assert.equal(reviewOutcome(changes, 1, true, limits).state, 'failed', 'one correction round only');
+  assert.equal(reviewOutcome({ ...changes, route: 'escalate' }, 0, false, limits).state, 'failed');
+});
+
+test('the veto window applies to batches the agent decided alone, above small changes', () => {
+  const agent = (risk: 'local' | 'contained') => comment({ state: 'fixed', by_agent: 1, risk });
+  const pass = (riskClass: 'local' | 'contained'): SelfReviewResult => ({ riskClass, verdict: 'pass', summary: '', findings: [] });
+  assert.equal(vetoApplies([agent('contained')], pass('contained')), true);
+  assert.equal(vetoApplies([agent('local')], pass('local')), false);
+  assert.equal(vetoApplies([agent('local')], pass('contained')), true, 'the review rates the diff higher than the agent did');
+  assert.equal(vetoApplies([agent('contained'), comment({ id: 2, state: 'fixed' })], pass('contained')), false, 'I submitted the batch');
+});
+
+test('the veto window counts only active days and hours', () => {
+  const active = { days: [1, 2, 3, 4, 5], from: 7, to: 18 };
+  const at = (day: number, h: number, m = 0) => new Date(2026, 10, day, h, m); // November 2026: the 23rd is a Monday
+  assert.deepEqual(addActiveMinutes(at(23, 9), 240, active), at(23, 13));
+  assert.deepEqual(addActiveMinutes(at(23, 16), 240, active), at(24, 9), 'two hours today, two tomorrow');
+  assert.deepEqual(addActiveMinutes(at(27, 17), 240, active), at(30, 10), 'over the weekend');
+  assert.deepEqual(addActiveMinutes(at(28, 12), 60, active), at(30, 8), 'started on a Saturday');
+  assert.deepEqual(addActiveMinutes(at(23, 5), 30, active), at(23, 7, 30), 'started before the active hours');
+  assert.deepEqual(addActiveMinutes(at(23, 9), 60, { days: [], from: 7, to: 18 }), at(23, 10), 'without active days the wall clock counts');
 });

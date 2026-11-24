@@ -1,13 +1,28 @@
-import { batchStatus, replyFor, shouldResolve } from './batch.ts';
+import { type SelfReviewResult, addActiveMinutes, batchStatus, replyFor, shouldResolve, vetoApplies } from './batch.ts';
 import { type TaskSource, checkTask, hasProse } from './checklist.ts';
 import { type Comment, type Db, type Pr, now } from './db.ts';
-import { Blocked, git, isDirty, localChanged, push, rebaseOntoBase, sync } from './git.ts';
+import { Blocked, Diverged, git, isDirty, localChanged, push, rebaseOntoBase, sync } from './git.ts';
 import { GithubError, findingUrl, graphql, rest, viewer } from './github.ts';
+import { activeHours, setting } from './settings.ts';
 import { changed, errorMessage } from './util.ts';
+
+/**
+ * New activity on an open batch: a running veto window starts over, and a failed self-review is retried on
+ * what comes next. When the activity is mine, the agent also gets its correction round back.
+ */
+function touchBatch(db: Db, prId: number, mine: boolean) {
+  const pr = db.pr(prId)!;
+  db.update('prs', prId, {
+    push_after: null,
+    self_review_state: pr.self_review_state === 'failed' ? null : pr.self_review_state,
+    ...(mine ? { self_review_round: 0 } : {}),
+  });
+}
 
 /** New items on one of my PRs: the batch starts at `headSha` unless one is open, and the agent gets to work. */
 export function openBatch(db: Db, prId: number, headSha: string) {
   db.update('prs', prId, { last_event_at: now(), batch_head_sha: db.pr(prId)!.batch_head_sha ?? headSha });
+  touchBatch(db, prId, false);
   db.enqueue(prId, 'comments');
   changed(prId);
 }
@@ -31,6 +46,46 @@ export function addConflict(db: Db, pr: Pr, headSha: string, baseSha: string, at
   });
   openBatch(db, pr.id, headSha);
   return true;
+}
+
+/**
+ * Agent commits that are not on top of a head pushed meanwhile become a conflict item: the agent rebases
+ * them onto the new head. Returns false when the agent already had this very item, so the caller blocks
+ * instead of looping.
+ */
+export function addDiverged(db: Db, pr: Pr, e: Diverged): boolean {
+  const key = `diverged:${e.head}:${e.remote}`;
+  if (db.comments(pr.id).some((c) => c.gh_key === key)) return false;
+  db.insert('comments', {
+    pr_id: pr.id,
+    kind: 'conflict',
+    gh_key: key,
+    author: 'github',
+    body: `The branch was pushed to (${e.remote.slice(0, 8)}) while you held commits that are not on top of it (HEAD ${e.head.slice(0, 8)}). Rebase your commits onto ${e.ref}.`,
+  });
+  openBatch(db, pr.id, e.remote);
+  return true;
+}
+
+/**
+ * With autonomy, changed code is pushed only after a self-review of exactly this HEAD passed, and a batch
+ * the agent decided alone waits out the veto window on top. Returns whether the push may go ahead.
+ */
+async function pushAllowed(db: Db, pr: Pr, path: string): Promise<boolean> {
+  const head = await git(path, ['rev-parse', 'HEAD']);
+  if (pr.self_review_sha !== head || !pr.self_review_state) {
+    db.update('prs', pr.id, { self_review_sha: head, self_review_state: null, self_review_result: null, push_after: null });
+    db.enqueue(pr.id, 'self_review');
+    changed(pr.id);
+    return false;
+  }
+  if (pr.self_review_state !== 'passed') return false;
+  if (pr.push_after) return Date.parse(pr.push_after) <= Date.now();
+  const review = pr.self_review_result ? (JSON.parse(pr.self_review_result) as SelfReviewResult) : null;
+  if (!setting('vetoMinutes') || !vetoApplies(db.comments(pr.id), review)) return true;
+  db.update('prs', pr.id, { push_after: addActiveMinutes(new Date(), setting('vetoMinutes'), activeHours()).toISOString() });
+  changed(pr.id);
+  return false;
 }
 
 // A checklist item quotes just its line, a whole comment its beginning.
@@ -164,11 +219,13 @@ export async function closeBatch(ctx: { db: Db; pr: Pr; ingest: (pr: Pr) => Prom
     if (moved && (await adoptBatchHead(db, pr, moved, path))) return; // reopened items need the agent first
     pr = db.pr(pr.id)!;
   } catch (e) {
+    if (e instanceof Diverged) return addDiverged(db, pr, e) ? undefined : ctx.block(e.message);
     if (e instanceof Blocked) return ctx.block(e.message);
     throw e;
   }
 
   if (await localChanged(pr, path)) {
+    if (setting('autonomy') && !(await pushAllowed(db, pr, path))) return;
     if (!(await rebaseOntoBase(pr, path))) {
       const head = await git(path, ['rev-parse', 'HEAD']);
       const base = await git(path, ['rev-parse', `refs/remotes/origin/${pr.base_ref}`]);
@@ -205,7 +262,14 @@ export async function closeBatch(ctx: { db: Db; pr: Pr; ingest: (pr: Pr) => Prom
     }
     changed(pr.id);
   }
-  db.update('prs', pr.id, { batch_head_sha: null });
+  db.update('prs', pr.id, {
+    batch_head_sha: null,
+    self_review_sha: null,
+    self_review_state: null,
+    self_review_result: null,
+    self_review_round: 0,
+    push_after: null,
+  });
   changed(pr.id);
 }
 
@@ -220,9 +284,9 @@ type Action = 'accept' | 'reject' | 'reply' | 'skip';
  * Settles one proposal. A reply I typed is posted as written; without one, the agent writes it, guided by the
  * proposal text. Returns whether the agent has work to do for it.
  */
-function decide(db: Db, c: Comment, action: Action, proposal: string | null, replyDraft: string | null): boolean {
+function decide(db: Db, c: Comment, action: Action, proposal: string | null, replyDraft: string | null, byAgent = false): boolean {
   const reply = replyDraft?.trim() || null;
-  const base = { proposal, auto: 0, decision: action };
+  const base = { proposal, auto: 0, decision: action, by_agent: byAgent ? 1 : 0 };
   if (action === 'skip') {
     db.update('comments', c.id, { ...base, state: 'skipped', skip_reason: null });
   } else if (action === 'reject' && reply) {
@@ -258,22 +322,24 @@ export function submitDecisions(db: Db, pr: Pr, input: SubmitInput) {
       needsAgent = true;
     }
     db.update('prs', pr.id, { last_event_at: now() });
+    touchBatch(db, pr.id, true);
     if (needsAgent) db.enqueue(pr.id, 'answers');
   });
-  applyPredecisions(db, pr);
+  // I saw the whole batch when I submitted it, so the pre-decisions I left untouched count as mine.
+  applyPredecisions(db, pr, false);
   changed(pr.id);
   return needsAgent;
 }
 
 /**
  * Once nothing waits for me any more, the agent's pre-decisions take effect together, so all fixes of a round
- * land in one run and one push. Returns whether they did.
+ * land in one run and one push. Returns whether they did. `byAgent` records that I did not submit them.
  */
-export function applyPredecisions(db: Db, pr: Pr): boolean {
+export function applyPredecisions(db: Db, pr: Pr, byAgent = true): boolean {
   const proposals = db.comments(pr.id).filter((c) => c.state === 'proposal');
   if (!proposals.length || proposals.some((c) => !c.decision) || db.questions(pr.id).some((q) => q.state === 'open')) return false;
   db.transaction(() => {
-    const work = proposals.map((c) => decide(db, c, c.decision!, c.proposal, null));
+    const work = proposals.map((c) => decide(db, c, c.decision!, c.proposal, null, byAgent));
     if (work.some(Boolean)) db.enqueue(pr.id, 'answers');
   });
   changed(pr.id);
@@ -291,6 +357,7 @@ export function addInstruction(db: Db, pr: Pr, text: string) {
     state: 'accepted',
   });
   db.update('prs', pr.id, { last_event_at: now(), ...(pr.role === 'own' && !pr.batch_head_sha ? { batch_head_sha: pr.head_sha } : {}) });
+  touchBatch(db, pr.id, true);
   db.enqueue(pr.id, 'answers');
   changed(pr.id);
 }

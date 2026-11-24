@@ -1,10 +1,10 @@
 import { DatePipe, NgTemplateOutlet } from '@angular/common';
 import { Component, computed, effect, inject, input, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import { Api, type Comment, type Finding, type PrDetail, type Question, type ReviewThread } from './api';
+import { Api, type Comment, type Finding, type PrDetail, type Question, type ReviewThread, type SelfReview } from './api';
 import { Ci } from './ci';
 import { CodeExcerpt } from './code-excerpt';
-import { plural } from './pr-view';
+import { plural, pushTime, vetoPending } from './pr-view';
 import { Transcript } from './transcript';
 
 type Action = 'accept' | 'reject' | 'reply' | 'skip';
@@ -202,6 +202,19 @@ function saveDraft(id: number, draft: Draft) {
               <button class="small" (click)="act('unblock')">Retry</button>
             </div>
           }
+          @if (d.pr.self_review_state === 'failed' && !d.pr.blocked) {
+            <div class="banner error">
+              <strong>Self-review did not pass.</strong>
+              {{ selfReview()?.reason }}
+              <button class="small" (click)="act('retry-review')">Repeat review</button>
+              <button class="small" (click)="confirmAct('push-now', 'Push the changes although the self-review did not pass?')">
+                Push anyway
+              </button>
+            </div>
+          }
+          @if (d.pr.kept) {
+            <div class="banner">The worktree was kept: {{ d.pr.kept }}</div>
+          }
           @if (d.pr.ignored) {
             <div class="banner">This review is ignored. The agent does nothing here and sends no notifications.</div>
           }
@@ -331,6 +344,33 @@ function saveDraft(id: number, draft: Draft) {
 
             <section class="card panel">
               <h2>Push</h2>
+              @if (veto(d.pr)) {
+                <p>
+                  <span class="tag small bad">Auto</span>
+                  The agent decided this batch alone. It is pushed {{ pushTime(d.pr.push_after!) }} unless I step in: an instruction makes
+                  the agent rework it, and pausing the PR holds it.
+                </p>
+                <button class="small" (click)="act('push-now')" [disabled]="busy()">Push now</button>
+              }
+              @if (selfReview(); as r) {
+                @if (r.verdict) {
+                  <p class="muted small">
+                    Self-review: {{ r.verdict === 'pass' ? 'passed' : 'changes needed' }} · {{ r.riskClass }}. {{ r.summary }}
+                  </p>
+                  @if (r.findings?.length) {
+                    <ul class="muted small">
+                      @for (f of r.findings; track $index) {
+                        <li>
+                          @if (f.path) {
+                            <code>{{ f.path }}{{ f.line ? ':' + f.line : '' }}</code>
+                          }
+                          {{ f.body }}
+                        </li>
+                      }
+                    </ul>
+                  }
+                }
+              }
               <p class="muted small">
                 @if (d.pr.batch === 'closable') {
                   {{ plural(d.pr.counts.pending, 'change') }} wait for push. The daemon rebases and pushes them once the quiet time has
@@ -518,6 +558,9 @@ function saveDraft(id: number, draft: Draft) {
                   </div>
                   @if (c.note && c.kind !== 'ci') {
                     <p class="muted small">{{ c.note }}</p>
+                  }
+                  @if (c.risk) {
+                    <p class="muted small">Agent rating: {{ c.risk }}, {{ c.confidence }} confidence. {{ c.reason }}</p>
                   }
                   @if (c.state === 'proposal') {
                     @if (c.clarify) {
@@ -722,6 +765,13 @@ export class PrPage {
   protected readonly actions = ACTIONS;
   protected readonly verdicts = VERDICTS;
   protected readonly plural = plural;
+  protected readonly pushTime = pushTime;
+  protected readonly veto = vetoPending;
+  /** The review the open batch got before its push, if one ran. */
+  protected readonly selfReview = computed(() => {
+    const raw = this.data()?.pr.self_review_result;
+    return raw ? (JSON.parse(raw) as SelfReview) : null;
+  });
   protected readonly data = signal<PrDetail | null>(null);
   protected readonly draft = signal<Draft>(emptyDraft());
   protected readonly busy = signal(false);
@@ -910,6 +960,7 @@ export class PrPage {
       ci: 'ci',
       instruction: 'instruction',
       conflict: 'conflict',
+      self_review: 'self-review',
     }[c.kind];
   }
 

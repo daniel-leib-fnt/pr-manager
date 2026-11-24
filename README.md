@@ -12,6 +12,15 @@ A local daemon with a dashboard for my GitHub pull requests: the ones I authored
   - When someone other than the daemon pushes to the branch, for example me by hand, open proposals go back to the agent. It judges them against the new head: what the push settles becomes "Already done" with a reply that says so, and a question the push settles is withdrawn.
   - When GitHub reports merge conflicts, the agent rebases onto the base branch and resolves mechanical conflicts; the batch then pushes the result. A conflict that needs a decision becomes a proposal.
   - As soon as GitHub allows merging a PR by the repository's own rules, and nothing is open in pr-manager, it moves to the top section "Ready to merge". If it loses that state, for example through a new review or a failed required check, the daemon reads it again right away.
+  - A batch pushed while the agent held commits is no dead end: the agent rebases its commits onto the pushed head like a merge conflict, and the PR is blocked only when that fails twice at the same commits.
+- **Deciding on its own (opt-in):** with `autonomy` switched on, the agent decides more than small changes, and every push is reviewed first. Switched off, which is the default, nothing of this applies.
+  - Every proposal that changes code carries a risk class (`local`: the small-change rubric; `contained`: a change of behavior inside the topic of the PR; `structural`: public API, schema, build, dependencies, security, files outside the topic), a confidence (high, medium, low) and a reason, all shown on the proposal. The daemon, not the agent, turns them into a decision: `local` is always the agent's, `contained` and `structural` from the confidence I set for each, and by default never.
+  - Failed CI runs that need more than a small fix and merge conflicts that need a decision take the same route. After the configured number of CI fix attempts a CI failure always waits for me.
+  - Before the agent asks me a question, it looks the facts up itself. With a defensible assumption it proposes the change, names the assumption, and repeats it in the reply to the reviewer. Only without one it asks.
+  - When a batch is complete, a second agent session reviews its diff before the push: a fresh session without the working session's context, read-only, with no tests to run, and with its own prompt and model. It reports a verdict and its own risk class of the diff.
+  - Findings it marks as fixable go back to the working agent once. Findings that need a decision, findings left after that round, a review that fails or reports nothing, and a diff it rates above what the agent may decide all put the PR under "Needs me", where I repeat the review, give an instruction, or push anyway.
+  - A reviewed batch the agent decided alone, with a change above `local`, then waits out the veto window (default 4 hours, counted only on the active days and hours) in "Waiting for push" with a red "Auto" tag. The PR page shows the review, the time of the push and "Push now". An instruction makes the agent rework the batch; the review and the window then start over. A batch I submitted myself is reviewed too, but pushed without a window.
+  - Items that wait for me wait without a deadline; nothing is decided because I did not answer.
 - **PRs I review:** the agent writes one review draft with findings and a suggested verdict. I edit and submit it, and can skip single findings or the review body.
   - A review body is written only when the review guidelines ask for one. The default guidelines ask for it only when work spans several findings, listed as task lines.
   - New commits after a submitted review mark it as out of date; they start no new review.
@@ -37,7 +46,7 @@ A local daemon with a dashboard for my GitHub pull requests: the ones I authored
   - A run interrupted by a restart is queued again, and the session is told to check its unfinished changes.
 - **No network for agents:** sessions get no GitHub token, no SSH agent, no credential helper and an empty gh config. Pushing, posting and resolving are daemon actions that run only when a batch closes.
 - **Tool allowlist:** the allowlist is part of the agent prompt, together with the rule that every command of a Bash call must match it, so no pipes, chains or `cd`. Denied calls appear in the transcript and on the settings page, each with a suggested allow rule.
-- **Cleanup:** merged PRs, withdrawn review requests and closed reviews have their worktree and agent session removed automatically, unless the worktree holds uncommitted or unpushed work or an interactive session. My own closed PRs keep their worktree until I remove it on the dashboard.
+- **Cleanup:** merged PRs, withdrawn review requests and closed reviews have their worktree and agent session removed automatically, unless the worktree holds uncommitted or unpushed work or an interactive session. Uncommitted changes and an interactive session block the cleanup; commits that were never pushed do not: the worktree is kept, and the PR stays in "Closed" with a note until the commits are gone. My own closed PRs keep their worktree until I remove it on the dashboard.
 
 Worktrees live at `~/SC/github/<org>/<repo>.worktrees/<branch-with-dash>`. Clones are created at `~/SC/github/<org>/<repo>` when missing.
 
@@ -52,6 +61,7 @@ Settings come in two kinds:
   - Build: ignored checks, minimum successful checks, globally and per repository.
   - Reviews: wait for a green build, automatic follow-up, review guidelines.
   - My PRs: the small-change rubric, CI fix attempts, batch quiet time, thread resolving, reply header, auto-removal of merged worktrees.
+  - Autonomy: the opt-in switch, the confidence from which the agent decides contained and structural changes, the veto window, additional guidance appended to the risk classes, the prompt and the model of the self-review.
   - Agent: allowed tools, parallel sessions, model, turn and budget limits.
   - Notifications: which events notify.
 
@@ -68,6 +78,17 @@ services.pr-manager = {
 ```
 
 Agents can use additional MCP servers, for example Jira and Confluence, through `services.pr-manager.mcpServers`. Every tool of these servers is allowed. This option exists only in Home Manager, because each server starts a program.
+
+Personal preferences belong into the settings, not into the repository: the defaults describe a daemon that decides nothing beyond small changes, and everything above is switched on per user. For example:
+
+```nix
+services.pr-manager.settings = {
+  autonomy = true;
+  autonomyContained = "medium";
+  vetoMinutes = 240;
+  decisionNotes = "Never change database migrations without me.";
+};
+```
 
 Some things stay fixed on purpose:
 - Agents never get GitHub credentials.

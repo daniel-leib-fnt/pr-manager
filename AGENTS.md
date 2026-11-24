@@ -37,7 +37,7 @@ CI ([.github/workflows/check.yml](.github/workflows/check.yml)) runs `pnpm check
 | `server/runner.ts` | Picks queued `work_items`, preflights the worktree, runs the agent session, post-run bookkeeping |
 | `server/agent-tools.ts` | In-process MCP server `pr`: the only way an agent reports results (`mark_fixed`, `propose`, `ask`, `add_review_finding`, …) |
 | `server/actions.ts` | Batch items (`openBatch`, `addConflict`) and daemon-side GitHub writes: `closeBatch` (rebase, push, replies, resolve, checkbox), `submitReview`, dashboard decisions |
-| `server/batch.ts` | Pure batch rules: open/closable, reply text, thread resolving |
+| `server/batch.ts` | Pure batch rules: open/closable, reply text, thread resolving; autonomy rules: decision limits, self-review outcome, veto window |
 | `server/checklist.ts` | Pure Markdown task-list parsing and checking |
 | `server/git.ts` | git via `execFile`; worktrees, sync, rebase, push; `Blocked` error; per-repo serialization |
 | `server/github.ts` | GraphQL/REST client with `gh auth token`; PR queries; pure helpers |
@@ -45,6 +45,7 @@ CI ([.github/workflows/check.yml](.github/workflows/check.yml)) runs `pnpm check
 | `server/cli.ts` | `pr-manager pause|resume` CLI, talks to the HTTP API |
 | `server/util.ts` | Event bus, `run`, desktop notifications |
 | `prompts/workflow.md` | System prompt appended for every agent session; `{{…}}` placeholders filled in `settings.ts` `workflowPrompt` |
+| `prompts/autonomy.md`, `prompts/risk-classes.md` | Appended to the workflow prompt only with the `autonomy` setting; the risk classes also go into the self-review prompt (setting `selfReviewPrompt`) |
 | `web/src/app/` | Angular standalone components: `overview.ts`, `pr-page.ts`, `settings.ts`, `transcript.ts`; `api.ts` holds the API types (hand-copied from `server/db.ts`) |
 | `nix/module.nix`, `nix/package.nix` | Home Manager module (systemd user service) and package |
 | `test/` | `node:test` tests of pure logic, one file per server module |
@@ -54,7 +55,8 @@ CI ([.github/workflows/check.yml](.github/workflows/check.yml)) runs `pnpm check
 1. Poller: search → upsert `prs` → `ingest` adds `comments` rows (kinds in `CommentKind`) and enqueues a `work_items` row.
 2. Runner: one queued kind set per PR → `preflight` (worktree, interactive session check, `sync`) → `query()` with the `pr` MCP server.
 3. Agent: changes code, amends, reports via MCP tools. Comment states: `new → fixed | proposal | done`, `proposal → accepted | skipped` (dashboard), `accepted → fixed`.
-4. Batch closes (quiet time elapsed, nothing open): `closeBatch` rebases, pushes with `--force-with-lease`, posts replies, resolves threads, sets comments `done`. A failed rebase becomes a `conflict` item and reopens the batch.
+4. With `autonomy`: before the push, `closeBatch` enqueues `self_review`; the runner reviews the batch diff in a fresh read-only session (`runSelfReview`), and `pushAllowed` in `actions.ts` lets the push through only after a passed review of exactly that HEAD and, for a batch the agent decided alone, the veto window.
+5. Batch closes (quiet time elapsed, nothing open): `closeBatch` rebases, pushes with `--force-with-lease`, posts replies, resolves threads, sets comments `done`. A failed rebase becomes a `conflict` item and reopens the batch.
 
 The runner depends on the poller, never the other way round: the poller wakes the runner with `bus.emit('wake')`.
 

@@ -3,7 +3,7 @@ import { addConflict, enqueueReReview, openBatch, recheckAfterPush } from './act
 import { batchStatus, buildGreen, reReviewReason, readyToClose } from './batch.ts';
 import { type TaskSource, hasTasks, parseTasks, taskKeys } from './checklist.ts';
 import { type Comment, type Db, type Pr, type PrState, now } from './db.ts';
-import { Blocked, removeWorktree } from './git.ts';
+import { Blocked, Unpushed, removeWorktree } from './git.ts';
 import {
   type GhComment,
   type GhPr,
@@ -176,6 +176,14 @@ export function createPoller({ db, dashboardUrl }: PollerDeps) {
       db.run('DELETE FROM prs WHERE id = ?', pr.id);
       clearNotification(`cleanup:${pr.id}`);
     } catch (e) {
+      // Unpushed commits are no reason to stop me: the worktree stays, and the PR says why.
+      if (e instanceof Unpushed) {
+        if (pr.kept !== e.message) {
+          db.update('prs', pr.id, { kept: e.message });
+          changed(pr.id);
+        }
+        return;
+      }
       const reason = `Cleanup blocked: ${errorMessage(e)}`;
       if (pr.blocked !== reason) db.update('prs', pr.id, { blocked: reason });
       if (e instanceof Blocked)
