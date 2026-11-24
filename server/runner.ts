@@ -1,23 +1,66 @@
 import { randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, realpathSync } from 'node:fs';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
-import { type Options, type SDKResultMessage, query } from '@anthropic-ai/claude-agent-sdk';
-import { AGENT_TOOL_SERVER, type PreviousDraft, createAgentTools } from './agent-tools.ts';
-import { adoptBatchHead, applyPredecisions, closeBatch } from './actions.ts';
-import { runnable } from './batch.ts';
+import { type Options, type SDKResultMessage, deleteSession, query } from '@anthropic-ai/claude-agent-sdk';
+import { AGENT_TOOL_SERVER, type PreviousDraft, createAgentTools, createReviewTools } from './agent-tools.ts';
+import { addDiverged, adoptBatchHead, applyPredecisions, closeBatch } from './actions.ts';
+import { type SelfReviewResult, batchAutonomy, reviewOutcome, runnable } from './batch.ts';
 import { config, extraMcpServers } from './config.ts';
-import { type Db, type Pr, type WorkItem, type WorkKind, now } from './db.ts';
-import { Blocked, ensureWorktree, fetchBase, git, interactiveSessionsIn, isDirty, sync } from './git.ts';
+import { type Comment, type Db, type Pr, type WorkItem, type WorkKind, now } from './db.ts';
+import { Blocked, Diverged, ensureWorktree, fetchBase, git, interactiveSessionsIn, isDirty, sync } from './git.ts';
 import { draftThreads, prDetail, viewer } from './github.ts';
 import type { Poller } from './poller.ts';
-import { isExcluded, recordDenied, setting, workflowPrompt } from './settings.ts';
+import { autonomyLimits, isExcluded, recordDenied, selfReviewPrompt, setting, workflowPrompt } from './settings.ts';
 import { bus, changed, errorMessage, notify } from './util.ts';
 
 /** Lower runs first. Answers to my input beat new work; batch closing beats both. */
-const PRIORITY: Record<WorkKind, number> = { close_batch: 0, answers: 1, comments: 2, followup_review: 3, review: 3, summarize: 4 };
+const PRIORITY: Record<WorkKind, number> = {
+  close_batch: 0,
+  answers: 1,
+  comments: 2,
+  self_review: 2,
+  followup_review: 3,
+  review: 3,
+  summarize: 4,
+};
 
 /** Defense in depth; the real guard is that the session has no credentials (see agentEnv). */
 const DENY = ['Bash(git push *)', 'Bash(git push)', 'Bash(gh *)', 'Bash(gh)', 'Bash(curl *)', 'Bash(wget *)'];
+
+/** A self-review only reads: the files, and git's view of the batch. */
+const REVIEW_TOOLS = ['Read', 'Glob', 'Grep', 'Bash(git diff *)', 'Bash(git log *)', 'Bash(git show *)', 'Bash(git range-diff *)'];
+const REVIEW_DENY = [...DENY, 'Bash(git diff *--output*)', 'Bash(git log *--output*)', 'Bash(git show *--output*)'];
+
+/**
+ * What a self-review session is asked: the diff of the batch and the decisions it implements, so the
+ * review can tell whether the changes do what was decided and nothing else.
+ */
+export function selfReviewTask(pr: Pick<Pr, 'url' | 'title'>, comments: Comment[], start: string): string {
+  const pending = comments.filter((c) => (c.state === 'fixed' || c.state === 'skipped') && c.kind !== 'self_review');
+  const decisions = pending.map((c) => {
+    const where = c.path ? ` (${c.path}${c.line ? `:${c.line}` : ''})` : '';
+    const what =
+      c.state === 'skipped' ? 'declined, no code change' : c.clarify ? 'reply only, no code change' : (c.proposal ?? 'fixed directly');
+    const who = c.by_agent || c.auto ? 'decided by the agent' : 'decided by me';
+    const rating = c.risk ? `, rated ${c.risk} with ${c.confidence} confidence` : '';
+    return `- ${c.kind}${where}: ${(c.task ?? c.body).split('\n').slice(0, 3).join(' ').slice(0, 300)}\n  Decision (${who}${rating}): ${what.slice(0, 600)}`;
+  });
+  const rebased = pending.some((c) => c.kind === 'conflict');
+  return [
+    `Review the changes of the open batch on my pull request ${pr.url} ("${pr.title}").`,
+    `The batch diff: \`git diff ${start} HEAD\`. The changes were amended into the existing commits, so compare the two trees, not the commit list.`,
+    rebased
+      ? `The batch contains a rebase, so that diff also shows what the base branch brought in. \`git range-diff ${start}...HEAD\` shows only how the commits of the pull request changed.`
+      : '',
+    `The decisions the batch implements:\n${decisions.join('\n') || '- none recorded'}`,
+    'Report once with report_review.',
+  ]
+    .filter(Boolean)
+    .join('\n\n');
+}
+
+const reviewFindings = (r: SelfReviewResult) =>
+  [r.summary, ...r.findings.map((f) => `- ${f.path ? `${f.path}${f.line ? `:${f.line}` : ''}: ` : ''}${f.body}`)].join('\n');
 
 const FILE_TOOLS = new Set(['Write', 'Edit', 'MultiEdit', 'NotebookEdit']);
 /** Project settings can define hooks and allow rules for later sessions, so an agent must never write them. */
@@ -131,7 +174,14 @@ export function createRunner({ db, poller, dashboardUrl }: RunnerDeps) {
         `An interactive Claude session (${sessions[0].name ?? sessions[0].sessionId}) works in ${path}. Pause the PR or close the session, then retry.`,
       );
     if ((await isDirty(path)) && !pr.dirty_by_agent) throw new Blocked(`${path} has uncommitted changes I did not make.`);
-    const moved = await sync(db.pr(pr.id)!, path);
+    let moved: string | undefined;
+    try {
+      moved = await sync(db.pr(pr.id)!, path);
+    } catch (e) {
+      // The agent rebases its commits onto the pushed head itself; only a second failure at the same commits blocks.
+      if (!(e instanceof Diverged)) throw e;
+      if (!addDiverged(db, db.pr(pr.id)!, e)) throw new Blocked(e.message);
+    }
     if (moved) await adoptBatchHead(db, db.pr(pr.id)!, moved, path);
     await fetchBase(path, pr);
     return path;
@@ -323,6 +373,99 @@ export function createRunner({ db, poller, dashboardUrl }: RunnerDeps) {
     }
   }
 
+  /**
+   * Reviews the open batch in a fresh, read-only session that shares nothing with the working session, and
+   * records what follows: push, one correction round for the agent, or a batch that waits for me.
+   */
+  async function runSelfReview(pr: Pr, item: WorkItem) {
+    let path: string;
+    try {
+      path = await preflight(pr);
+    } catch (e) {
+      if (e instanceof Blocked) return block(pr, e.message);
+      throw e;
+    }
+    pr = db.pr(pr.id)!;
+    const head = await git(path, ['rev-parse', 'HEAD']);
+    const sessionId = randomUUID();
+    db.update('work_items', item.id, { state: 'in_progress', started_at: now() });
+    db.update('prs', pr.id, { agent_running: 1 });
+    changed(pr.id);
+
+    const model = setting('selfReviewModel').trim() || setting('model').trim();
+    let review: SelfReviewResult | undefined;
+    let error: string | undefined;
+    try {
+      const options: Options = {
+        cwd: path,
+        sessionId,
+        abortController: running.get(pr.id) ?? new AbortController(),
+        pathToClaudeCodeExecutable: config.claudePath,
+        settingSources: ['user', 'project'],
+        permissionMode: 'default',
+        ...(model ? { model } : {}),
+        allowedTools: [...REVIEW_TOOLS, `mcp__${AGENT_TOOL_SERVER}`],
+        disallowedTools: ['AskUserQuestion', 'Write', 'Edit', 'MultiEdit', 'NotebookEdit'],
+        settings: { permissions: { deny: REVIEW_DENY } },
+        strictMcpConfig: true,
+        mcpServers: { [AGENT_TOOL_SERVER]: createReviewTools((r) => (review = r)) },
+        canUseTool: async (name) => ({ behavior: 'deny', message: `${name} is not allowed in a self-review. Continue without it.` }),
+        env: agentEnv(),
+        maxTurns: setting('maxTurns'),
+        maxBudgetUsd: setting('maxBudgetUsd'),
+        systemPrompt: { type: 'preset', preset: 'claude_code', append: selfReviewPrompt() },
+        stderr: (d) => process.stderr.write(`[${pr.repo}#${pr.number} self-review] ${d}`),
+      };
+      let result: SDKResultMessage | undefined;
+      for await (const message of query({
+        prompt: selfReviewTask(pr, db.comments(pr.id), pr.batch_head_sha ?? pr.head_sha),
+        options,
+      })) {
+        if (message.type === 'result') result = message;
+      }
+      if (!result) error = 'The self-review session ended without a result.';
+      else if (result.subtype !== 'success' || result.is_error)
+        error = `The self-review session ended with ${result.subtype}${'result' in result ? `: ${result.result}` : ''}`;
+    } catch (e) {
+      error = errorMessage(e);
+    }
+    await deleteSession(sessionId, { dir: path }).catch(() => undefined);
+
+    pr = db.pr(pr.id)!;
+    // A session that failed after reporting still reported; one that never reported failed, whatever it said.
+    const outcome = review
+      ? reviewOutcome(review, pr.self_review_round, batchAutonomy(db.comments(pr.id)).autonomous, autonomyLimits())
+      : ({ state: 'failed', reason: error ?? 'The self-review ended without a result.' } as const);
+    const stored = JSON.stringify({ ...(review ?? {}), reason: outcome.state === 'failed' ? outcome.reason : null });
+    if (outcome.state === 'fix') {
+      db.insert('comments', {
+        pr_id: pr.id,
+        kind: 'self_review',
+        gh_key: `self_review:${Date.now()}`,
+        author: 'self-review',
+        body: reviewFindings(review!),
+        state: 'accepted',
+        decision: 'accept',
+        proposal: 'Fix the findings of the self-review.',
+        by_agent: 1,
+      });
+      db.enqueue(pr.id, 'answers');
+    }
+    db.update('prs', pr.id, {
+      agent_running: 0,
+      self_review_sha: head,
+      self_review_result: stored,
+      self_review_state: outcome.state === 'fix' ? null : outcome.state,
+      self_review_round: pr.self_review_round + (outcome.state === 'fix' ? 1 : 0),
+    });
+    db.update('work_items', item.id, { state: review ? 'done' : 'failed', error: review ? null : (error ?? null), finished_at: now() });
+    if (outcome.state === 'failed')
+      notify('input', `Self-review needs you: ${pr.repo}#${pr.number}`, outcome.reason.slice(0, 300), prUrl(pr), `self-review:${pr.id}`);
+    changed(pr.id);
+    if (outcome.state === 'fix') bus.emit('wake');
+    else poller.checkBatches();
+  }
+
   /** Compacts the session; a failure only costs a larger context on the next run. */
   async function compact(pr: Pr, options: Options) {
     try {
@@ -385,7 +528,12 @@ export function createRunner({ db, poller, dashboardUrl }: RunnerDeps) {
       changed(pr.id);
       return;
     }
-    await runSession(pr, queued);
+    const review = queued.find((w) => w.kind === 'self_review');
+    const rest = queued.filter((w) => w.kind !== 'self_review');
+    if (review && !rest.some((w) => w.kind !== 'summarize')) return runSelfReview(pr, review);
+    // New work changes what there is to review; the batch asks for a review again once it is complete.
+    if (review) db.update('work_items', review.id, { state: 'done', finished_at: now() });
+    await runSession(pr, rest);
   }
 
   function failed(pr: Pr, e: unknown) {

@@ -8,6 +8,25 @@ import { run } from './util.ts';
 /** A condition that needs a human before the agent may continue on this PR. */
 export class Blocked extends Error {}
 
+/**
+ * The branch was pushed to during an open batch, and the worktree holds agent commits that are not on top
+ * of the new head. The agent rebases them itself; the message is the blocking reason if that fails.
+ */
+export class Diverged extends Error {
+  head: string;
+  remote: string;
+  ref: string;
+  constructor(message: string, head: string, remote: string, ref: string) {
+    super(message);
+    this.head = head;
+    this.remote = remote;
+    this.ref = ref;
+  }
+}
+
+/** A merged PR's worktree holds commits that were never pushed, so it is kept instead of removed. */
+export class Unpushed extends Error {}
+
 export const git = async (cwd: string, args: string[]) => (await run('git', args, { cwd })).trim();
 
 const gitOk = (cwd: string, args: string[]) =>
@@ -130,8 +149,8 @@ const isAncestor = (cwd: string, a: string, b: string) => gitOk(cwd, ['merge-bas
  * branch may hold amended commits that the batch will push.
  *
  * If the branch was pushed to while the batch was open, the batch continues from the new head as
- * long as no agent work would be lost, and the new head is returned for the caller to record. The
- * PR is blocked only when the worktree holds agent changes that are not on top of the new head.
+ * long as no agent work would be lost, and the new head is returned for the caller to record. Agent
+ * commits that are not on top of the new head raise `Diverged`; uncommitted agent changes block the PR.
  */
 export async function sync(pr: Pr, path: string): Promise<string | undefined> {
   await fetchHead(path, pr);
@@ -157,8 +176,11 @@ export async function sync(pr: Pr, path: string): Promise<string | undefined> {
     }
     // Agent commits already rebased onto the new head stay and are pushed with the batch.
     if (await isAncestor(path, remote, head)) return remote;
-    throw new Blocked(
+    throw new Diverged(
       `${moved}, and the worktree holds agent commits that are not on top of it (HEAD ${head.slice(0, 8)}). To keep them, rebase them onto ${branch} in ${path}; to drop them, run "git reset --hard ${branch}" there. Then press Retry.`,
+      head,
+      remote,
+      remoteHeadRef(pr),
     );
   }
   if (head === remote) return;
@@ -228,7 +250,7 @@ export function interactiveSessionsIn(path: string, ownSessionIds: Set<string>):
   return out;
 }
 
-/** Removes a worktree after merge, unless it holds anything that would be lost. */
+/** Removes a worktree after merge, unless it holds anything that would be lost: `Blocked`, or `Unpushed` for commits. */
 export async function removeWorktree(pr: Pr, ownSessionIds: Set<string>) {
   const path = pr.worktree;
   if (!path || !existsSync(path)) return;
@@ -246,7 +268,7 @@ export async function removeWorktree(pr: Pr, ownSessionIds: Set<string>) {
     }
     const head = await git(path, ['rev-parse', 'HEAD']);
     if (head !== pr.head_sha && !(await isAncestor(path, head, pr.head_sha))) {
-      throw new Blocked(`Worktree ${path} holds commits that were never pushed.`);
+      throw new Unpushed(`Worktree ${path} holds commits that were never pushed.`);
     }
   }
   const sessions = interactiveSessionsIn(path, ownSessionIds);

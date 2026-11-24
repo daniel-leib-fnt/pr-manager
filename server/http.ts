@@ -13,12 +13,12 @@ import {
 } from './actions.ts';
 import { batchStatus, buildGreen, runnable } from './batch.ts';
 import { config } from './config.ts';
-import type { Db, Pr } from './db.ts';
+import { type Db, type Pr, now } from './db.ts';
 import { commentExcerpt, excerpt } from './excerpt.ts';
 import { type ReviewThread, findingUrl } from './github.ts';
 import type { Poller } from './poller.ts';
 import type { Runner } from './runner.ts';
-import { deniedCalls, describeNixOnly, describeSettings, isExcluded, resetOverride, saveOverrides } from './settings.ts';
+import { deniedCalls, describeNixOnly, describeSettings, isExcluded, resetOverride, saveOverrides, setting } from './settings.ts';
 import { bus, changed, clearNotification, errorMessage } from './util.ts';
 
 type Group = 'ready' | 'needs_me' | 'working' | 'queued' | 'push' | 'out_of_date' | 'waiting' | 'ignored' | 'closed';
@@ -29,6 +29,8 @@ function groupOf(db: Db, pr: Pr): Group {
   if (pr.ignored) return 'ignored';
   if (pr.blocked) return 'needs_me';
   if (pr.agent_running) return 'working';
+  // A self-review that did not pass holds the push until I repeat it, fix the cause or push anyway.
+  if (setting('autonomy') && pr.self_review_state === 'failed') return 'needs_me';
   const comments = db.comments(pr.id);
   const questions = db.questions(pr.id);
   if (comments.some((c) => c.state === 'proposal') || questions.some((q) => q.state === 'open') || pr.review_state === 'draft')
@@ -145,6 +147,21 @@ export function createHttp({ db, poller, runner }: { db: Db; poller: Poller; run
       db.update('prs', pr.id, { paused: 0 });
       changed(pr.id);
       runner.wake();
+    },
+    // Ends the veto window, and lets a batch through whose self-review did not pass.
+    'POST push-now': async (_q, _r, pr) => {
+      if (pr.self_review_state !== 'failed' && !pr.push_after) throw new Error('Nothing waits for my go-ahead.');
+      db.update('prs', pr.id, { self_review_state: 'passed', push_after: now() });
+      clearNotification(`self-review:${pr.id}`);
+      changed(pr.id);
+      poller.checkBatches();
+    },
+    'POST retry-review': async (_q, _r, pr) => {
+      if (pr.self_review_state !== 'failed') throw new Error('There is no failed self-review to repeat.');
+      db.update('prs', pr.id, { self_review_state: null, self_review_result: null, self_review_round: 0 });
+      clearNotification(`self-review:${pr.id}`);
+      changed(pr.id);
+      poller.checkBatches();
     },
     'POST unblock': async (_q, _r, pr) => {
       db.update('prs', pr.id, { blocked: null });

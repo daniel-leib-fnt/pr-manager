@@ -1,4 +1,5 @@
 import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import { z } from 'zod';
 import { config, extraMcpServers } from './config.ts';
 import type { Db } from './db.ts';
@@ -21,6 +22,38 @@ const DEFAULT_REVIEW_GUIDELINES = `- Read the PR description and the full diff. 
 - Skip style nitpicks that a formatter or linter would catch.
 - Write a review body only when something needs work that spans several findings, such as a design change touching several places. List that work as task lines (\`* [ ] ...\`), at least one. Otherwise leave the body empty.
 - Use APPROVE when nothing blocks, REQUEST_CHANGES for real defects, and COMMENT otherwise.`;
+
+const DEFAULT_SELF_REVIEW = `# pr-manager self-review
+
+You run unattended inside pr-manager. Another agent session changed code on one of my pull requests to settle review comments, failed checks or merge conflicts. Before the daemon pushes these changes, you review them independently. You know nothing of that session's reasoning, and that is intended: judge only what the diff does.
+
+You only read. You cannot change files, run tests, push or call GitHub. Use \`Read\`, \`Glob\`, \`Grep\` and the git commands named in the task. Follow the instruction files of the repository when you judge the code.
+
+Review only the changes of the batch, not the rest of the pull request:
+
+- Does the diff do what the listed decisions ask for, and nothing beyond them?
+- Does it introduce a defect, break a caller, or leave tests, documentation or generated files out of date?
+- Skip style nitpicks that a formatter or linter would catch.
+
+Classify the risk of the batch diff as a whole. The class of the riskiest change counts:
+
+{{RISK_CLASSES}}
+
+Report exactly once with \`mcp__pr__report_review\`, then finish your turn:
+
+- \`verdict\`: \`pass\` when the changes can be pushed as they are, \`changes\` when something has to be fixed first.
+- \`route\`, only with \`changes\`: \`auto-fixable\` when the findings are unambiguous and the other session can fix them without a decision of mine, \`escalate\` when I have to decide.
+- \`findings\`: one entry per real problem, with file and line. Empty for \`pass\`.
+- \`summary\`: two or three sentences on what the batch changes and why you reached the verdict.`;
+
+const THRESHOLDS = [
+  { value: 'never', label: 'Never, I decide' },
+  { value: 'high', label: 'With high confidence' },
+  { value: 'medium', label: 'With medium confidence or higher' },
+  { value: 'low', label: 'Always' },
+];
+const threshold = z.enum(['never', 'high', 'medium', 'low']);
+type Threshold = z.infer<typeof threshold>;
 
 const NOTIFY_EVENTS = ['input', 'review_draft', 'blocked', 'error'] as const;
 export type NotifyEvent = (typeof NOTIFY_EVENTS)[number];
@@ -189,6 +222,64 @@ export const DEFS = {
     schema: z.boolean(),
     default: true,
   }),
+  autonomy: def({
+    group: 'Autonomy',
+    label: 'Let the agent decide on its own, with a self-review before every push',
+    help: 'Off: the agent pre-decides only small changes, as described under "My PRs". On: every proposal carries a risk class and a confidence, the limits below say what the agent may decide, and a second, read-only agent session reviews each batch before it is pushed.',
+    type: 'boolean',
+    schema: z.boolean(),
+    default: false,
+  }),
+  autonomyContained: def({
+    group: 'Autonomy',
+    label: 'Contained changes: the agent decides',
+    help: 'Changes of behavior inside the topic of the PR, without touching a public API, a schema, the build or dependencies.',
+    type: 'enum',
+    options: THRESHOLDS,
+    schema: threshold,
+    default: 'never' as Threshold,
+  }),
+  autonomyStructural: def({
+    group: 'Autonomy',
+    label: 'Structural changes: the agent decides',
+    help: 'Changes to a public API, a database schema, the build, dependencies, security-relevant code or files outside the topic of the PR.',
+    type: 'enum',
+    options: THRESHOLDS,
+    schema: threshold,
+    default: 'never' as Threshold,
+  }),
+  vetoMinutes: def({
+    group: 'Autonomy',
+    label: 'Veto window (minutes)',
+    help: 'A reviewed batch the agent decided alone, with a change above "small", is pushed only after this long. Only the active days and hours under "Polling" count. 0 pushes right away.',
+    type: 'number',
+    schema: z.number().int().min(0).max(10080),
+    default: 240,
+  }),
+  decisionNotes: def({
+    group: 'Autonomy',
+    label: 'Additional guidance for decisions',
+    help: 'Appended to the risk classes in the agent prompt, for example what I never want decided without me.',
+    type: 'text',
+    schema: z.string(),
+    default: '',
+  }),
+  selfReviewPrompt: def({
+    group: 'Autonomy',
+    label: 'Self-review prompt',
+    help: 'System prompt of the reviewing session. {{RISK_CLASSES}} becomes the risk classes the working agent uses.',
+    type: 'text',
+    schema: z.string().min(1),
+    default: DEFAULT_SELF_REVIEW,
+  }),
+  selfReviewModel: def({
+    group: 'Autonomy',
+    label: 'Self-review model',
+    help: 'Empty for the model of the working agent.',
+    type: 'string',
+    schema: z.string(),
+    default: '',
+  }),
   allowedTools: def({
     group: 'Agent',
     label: 'Allowed tools',
@@ -339,9 +430,17 @@ export function inPollWindow(now = new Date()): boolean {
   return setting('pollDays').includes(now.getDay()) && h >= setting('pollFromHour') && h < setting('pollToHour');
 }
 
-/** The workflow prompt with the configurable rubric, review guidelines and tool allowlist filled in. */
+const promptPart = (name: string) => readFileSync(join(dirname(config.promptFile), name), 'utf8').trim();
+
+/** The risk classes, one source for the working agent and the self-review. */
+export const riskClasses = () => promptPart('risk-classes.md').replace('{{SMALL_CHANGE_RUBRIC}}', setting('smallChangeRubric'));
+
+/**
+ * The workflow prompt with the configurable rubric, review guidelines and tool allowlist filled in. With
+ * autonomy switched on, the rules for classified decisions follow; without it the prompt stays as it was.
+ */
 export function workflowPrompt(template = readFileSync(config.promptFile, 'utf8')): string {
-  return template
+  const base = template
     .replace('{{SMALL_CHANGE_RUBRIC}}', setting('smallChangeRubric'))
     .replace('{{REVIEW_GUIDELINES}}', setting('reviewGuidelines'))
     .replace(
@@ -350,7 +449,22 @@ export function workflowPrompt(template = readFileSync(config.promptFile, 'utf8'
         .map((t) => `- \`${t}\``)
         .join('\n'),
     );
+  if (!setting('autonomy')) return base;
+  const notes = setting('decisionNotes').trim();
+  const autonomy = promptPart('autonomy.md')
+    .replace('{{RISK_CLASSES}}', riskClasses())
+    .replace('{{DECISION_NOTES}}', notes ? `Additional guidance from me:\n\n${notes}` : '')
+    .trim();
+  return `${base.trimEnd()}\n\n${autonomy}\n`;
 }
+
+export const selfReviewPrompt = () => setting('selfReviewPrompt').replace('{{RISK_CLASSES}}', riskClasses());
+
+/** What the agent may decide on its own above small changes. */
+export const autonomyLimits = () => ({ contained: setting('autonomyContained'), structural: setting('autonomyStructural') });
+
+/** The active days and hours, which also time the veto window. */
+export const activeHours = () => ({ days: setting('pollDays'), from: setting('pollFromHour'), to: setting('pollToHour') });
 
 export const isExcluded = (repo: string) => setting('excludedRepos').some((r) => r.toLowerCase() === repo.toLowerCase());
 

@@ -12,9 +12,12 @@ import {
   proposeRule,
   resetOverride,
   saveOverrides,
+  selfReviewPrompt,
   setting,
   workflowPrompt,
 } from '../server/settings.ts';
+import { readyToClose } from '../server/batch.ts';
+import type { Pr } from '../server/db.ts';
 
 const nixFile = (values: Record<string, unknown>) => {
   const path = join(mkdtempSync(join(tmpdir(), 'prm-settings-')), 'settings.json');
@@ -63,6 +66,37 @@ test('the prompt gets the rubric and the review guidelines', () => {
   assert.equal(workflowPrompt('A {{SMALL_CHANGE_RUBRIC}} B {{REVIEW_GUIDELINES}} C'), 'A Only typos. B Be brief. C');
   assert.match(workflowPrompt('{{ALLOWED_TOOLS}}'), /^- `Read`\n/);
   assert.doesNotMatch(workflowPrompt(), /\{\{/);
+});
+
+test('autonomy is opt-in: the prompt changes only when it is switched on', () => {
+  const db = openDb(':memory:');
+  initSettings(db, '');
+  const off = workflowPrompt();
+  assert.doesNotMatch(off, /riskClass/);
+  saveOverrides({ autonomy: true, smallChangeRubric: 'Only typos.', decisionNotes: 'Never touch migrations.' });
+  const on = workflowPrompt();
+  assert.ok(
+    on.startsWith(off.replace(/An item is small[^]*Changing tests is fine\./, 'Only typos.').trimEnd()),
+    'the workflow itself is unchanged',
+  );
+  assert.match(on, /`contained`/);
+  assert.match(on, /Only typos\./, 'the rubric defines the class local');
+  assert.match(on, /Additional guidance from me:\n\nNever touch migrations\./);
+  assert.doesNotMatch(on, /\{\{/);
+  assert.match(selfReviewPrompt(), /`structural`/, 'both agents share the classes');
+  assert.doesNotMatch(selfReviewPrompt(), /\{\{/);
+});
+
+test('with autonomy, a failed self-review and a running veto window hold the push back', () => {
+  const db = openDb(':memory:');
+  initSettings(db, '');
+  const pr = (over: Partial<Pr>) => ({ role: 'own', state: 'open', paused: 0, blocked: null, last_event_at: null, ...over }) as Pr;
+  const now = Date.parse('2026-11-24T10:00:00Z');
+  const held = [pr({ self_review_state: 'failed' }), pr({ push_after: '2026-11-24T11:00:00Z' })];
+  for (const p of held) assert.equal(readyToClose(p, 'closable', 0, now), true, 'ignored while autonomy is off');
+  saveOverrides({ autonomy: true });
+  for (const p of held) assert.equal(readyToClose(p, 'closable', 0, now), false);
+  assert.equal(readyToClose(pr({ self_review_state: 'passed', push_after: '2026-11-24T09:00:00Z' }), 'closable', 0, now), true);
 });
 
 test('denied calls propose a narrow rule', () => {

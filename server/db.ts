@@ -47,10 +47,23 @@ export interface Pr {
   ignored: number;
   /** 1 while GitHub reports one of my PRs as approved and mergeable. */
   ready: number;
+  /** Why the worktree of a merged PR was kept instead of removed; null otherwise. */
+  kept: string | null;
+  /** The worktree HEAD the self-review of the open batch ran on, or is about to run on. */
+  self_review_sha: string | null;
+  /** null: no review yet, or one is queued; passed: the batch may be pushed; failed: the push waits for me. */
+  self_review_state: 'passed' | 'failed' | null;
+  /** JSON SelfReviewResult of the last review of the open batch. */
+  self_review_result: string | null;
+  /** Correction rounds the self-review sent back to the agent in the open batch. */
+  self_review_round: number;
+  /** End of the veto window: a reviewed batch the agent decided alone is pushed only after this time. */
+  push_after: string | null;
   created_at: string;
 }
 
-type CommentKind = 'thread' | 'issue_comment' | 'review_body' | 'ci' | 'instruction' | 'conflict';
+// self_review: findings of the self-review on the open batch, handed back to the agent as an accepted item.
+type CommentKind = 'thread' | 'issue_comment' | 'review_body' | 'ci' | 'instruction' | 'conflict' | 'self_review';
 // new: not triaged yet; fixed: changed locally (or a reply that keeps the thread open), waiting for push;
 // proposal: waiting for a decision, possibly pre-decided by the agent; accepted: decided, agent has to implement
 // or write the reply (see `decision`);
@@ -86,6 +99,12 @@ export interface Comment {
    */
   decision: 'accept' | 'reject' | 'reply' | 'skip' | null;
   auto: number;
+  /** With autonomy: risk class, confidence and reason the agent gave for a proposal that changes code. */
+  risk: 'local' | 'contained' | 'structural' | null;
+  confidence: 'high' | 'medium' | 'low' | null;
+  reason: string | null;
+  /** 1 when the standing decision is the agent's pre-decision, taken without me submitting the batch. */
+  by_agent: number;
   note: string | null;
   /** Text of the checklist line this item stands for; null for a whole comment. */
   task: string | null;
@@ -127,7 +146,7 @@ export interface Finding {
   created_at: string;
 }
 
-export type WorkKind = 'summarize' | 'comments' | 'answers' | 'review' | 'followup_review' | 'close_batch';
+export type WorkKind = 'summarize' | 'comments' | 'answers' | 'review' | 'followup_review' | 'self_review' | 'close_batch';
 
 export interface WorkItem {
   id: number;
@@ -180,6 +199,12 @@ CREATE TABLE IF NOT EXISTS prs (
   review_threads TEXT,
   ignored INTEGER NOT NULL DEFAULT 0,
   ready INTEGER NOT NULL DEFAULT 0,
+  kept TEXT,
+  self_review_sha TEXT,
+  self_review_state TEXT,
+  self_review_result TEXT,
+  self_review_round INTEGER NOT NULL DEFAULT 0,
+  push_after TEXT,
   created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
 );
 CREATE TABLE IF NOT EXISTS comments (
@@ -204,6 +229,10 @@ CREATE TABLE IF NOT EXISTS comments (
   skip_reason TEXT,
   decision TEXT,
   auto INTEGER NOT NULL DEFAULT 0,
+  risk TEXT,
+  confidence TEXT,
+  reason TEXT,
+  by_agent INTEGER NOT NULL DEFAULT 0,
   note TEXT,
   task TEXT,
   task_source TEXT,
@@ -267,6 +296,16 @@ export function openDb(path = join(config.stateDir, 'pr-manager.db')) {
     ['comments', 'diff_hunk', 'TEXT'],
     ['findings', 'resolve', 'INTEGER NOT NULL DEFAULT 0'],
     ['prs', 'review_threads', 'TEXT'],
+    ['comments', 'risk', 'TEXT'],
+    ['comments', 'confidence', 'TEXT'],
+    ['comments', 'reason', 'TEXT'],
+    ['comments', 'by_agent', 'INTEGER NOT NULL DEFAULT 0'],
+    ['prs', 'kept', 'TEXT'],
+    ['prs', 'self_review_sha', 'TEXT'],
+    ['prs', 'self_review_state', 'TEXT'],
+    ['prs', 'self_review_result', 'TEXT'],
+    ['prs', 'self_review_round', 'INTEGER NOT NULL DEFAULT 0'],
+    ['prs', 'push_after', 'TEXT'],
   ];
   for (const [table, column, type] of migrations) {
     const cols = db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[];

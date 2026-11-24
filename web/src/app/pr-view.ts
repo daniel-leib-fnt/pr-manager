@@ -18,11 +18,25 @@ export function ciStatus(checkState: string | null): CiStatus | null {
 
 export const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
 
+/** A reviewed batch the agent decided alone, waiting out the veto window before its push. */
+export const vetoPending = (pr: Pr) => pr.group === 'push' && !!pr.push_after && Date.parse(pr.push_after) > Date.now();
+
+/** "at 14:30" today, "on Mon at 09:10" on another day. */
+export function pushTime(iso: string): string {
+  const at = new Date(iso);
+  const time = at.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  return at.toDateString() === new Date().toDateString()
+    ? `at ${time}`
+    : `on ${at.toLocaleDateString([], { weekday: 'short' })} at ${time}`;
+}
+
 /** One line on what happens next with a PR, shown under its title in the list. */
 export function nextStep(pr: Pr): string {
-  if (pr.state !== 'open') return pr.state === 'merged' ? 'Merged' : 'Closed';
+  if (pr.state !== 'open') return pr.kept ? `Worktree kept: ${pr.kept}` : pr.state === 'merged' ? 'Merged' : 'Closed';
   if (pr.ignored) return 'Ignored';
   if (pr.blocked) return `Blocked: ${pr.blocked}`;
+  if (pr.state === 'open' && pr.self_review_state === 'failed' && pr.group === 'needs_me' && !pr.counts.proposals && !pr.counts.questions)
+    return 'Self-review did not pass';
   if (pr.running) return 'Agent run in progress';
   if (pr.paused) return 'Agent paused';
   const todo = [
@@ -33,6 +47,7 @@ export function nextStep(pr: Pr): string {
   if (todo.length) return todo.join(' · ');
   if (pr.waitingForBuild) return 'Review waits for a green build';
   if (pr.group === 'queued') return 'Queued for the agent';
+  if (vetoPending(pr)) return `Push of ${plural(pr.counts.pending, 'change')} ${pushTime(pr.push_after!)} unless I step in`;
   if (pr.group === 'push') return `Push of ${plural(pr.counts.pending, 'change')} up next`;
   if (pr.group === 'ready') return 'Ready to merge';
   if (pr.group === 'out_of_date') return 'Review out of date';

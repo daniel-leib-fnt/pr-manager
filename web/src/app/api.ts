@@ -33,6 +33,14 @@ export interface Pr {
   review_out_of_date: number;
   ignored: number;
   ready: number;
+  /** Why the worktree of a merged PR was kept instead of removed. */
+  kept: string | null;
+  /** passed or failed once the self-review of the open batch ran; failed holds the push until I act. */
+  self_review_state: 'passed' | 'failed' | null;
+  /** JSON SelfReview of the open batch. */
+  self_review_result: string | null;
+  /** End of the veto window of a batch the agent decided alone, ISO 8601. */
+  push_after: string | null;
   /** GitHub's last update of the PR, ISO 8601. */
   gh_updated_at: string;
   group: Group;
@@ -52,7 +60,7 @@ export interface Excerpt {
 
 export interface Comment {
   id: number;
-  kind: 'thread' | 'issue_comment' | 'review_body' | 'ci' | 'instruction' | 'conflict';
+  kind: 'thread' | 'issue_comment' | 'review_body' | 'ci' | 'instruction' | 'conflict' | 'self_review';
   author: string | null;
   body: string;
   path: string | null;
@@ -65,12 +73,26 @@ export interface Comment {
   /** On a proposal the agent's pre-decision (null: mine to make); afterwards the decision taken. */
   decision: 'accept' | 'reject' | 'reply' | 'skip' | null;
   auto: number;
+  /** With autonomy: how the agent rated a proposal that changes code. */
+  risk: 'local' | 'contained' | 'structural' | null;
+  confidence: 'high' | 'medium' | 'low' | null;
+  reason: string | null;
   note: string | null;
   /** The checklist line this item stands for; null for a whole comment. */
   task: string | null;
   clarify: number;
   updated_at: string;
   excerpt: Excerpt | null;
+}
+
+/** Result of the read-only review a batch gets before it is pushed; `reason` says why it did not pass. */
+export interface SelfReview {
+  riskClass?: 'local' | 'contained' | 'structural';
+  verdict?: 'pass' | 'changes';
+  route?: 'auto-fixable' | 'escalate';
+  summary?: string;
+  findings?: { path?: string; line?: number; body: string }[];
+  reason: string | null;
 }
 
 export interface Question {

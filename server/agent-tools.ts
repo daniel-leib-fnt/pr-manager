@@ -1,8 +1,9 @@
 import { createSdkMcpServer, tool } from '@anthropic-ai/claude-agent-sdk';
 import { z } from 'zod';
+import { type Confidence, type RiskClass, type SelfReviewResult, mayDecide } from './batch.ts';
 import { hasProse } from './checklist.ts';
 import type { Db } from './db.ts';
-import { setting } from './settings.ts';
+import { autonomyLimits, setting } from './settings.ts';
 import { draftThreadReply } from './actions.ts';
 import { type GhPrDetail, commentableLines, prDetail, prFiles, rest, viewer } from './github.ts';
 import { changed, errorMessage } from './util.ts';
@@ -72,6 +73,50 @@ export function createAgentTools(
           return { name: c.name, url: c.url, log: `(log unavailable: ${errorMessage(e)})` };
         }
       }),
+    );
+  }
+
+  type Decision = 'accept' | 'reject' | 'reply' | 'skip';
+
+  /**
+   * Saves a proposal. `rating` is given only with autonomy: a code change then needs all three values, and
+   * my limits, not the agent, decide whether it is accepted. CI fixes beyond the attempt limit always wait for me.
+   */
+  function propose(
+    commentId: number,
+    proposal: string,
+    predecision: Decision | undefined,
+    clarifying: boolean | undefined,
+    rating?: { riskClass?: RiskClass; confidence?: Confidence; reason?: string },
+  ) {
+    const c = ownComment(commentId);
+    if (!c || (c.state !== 'new' && c.state !== 'accepted')) return fail(`Comment ${commentId} is not open.`);
+    let decision: Decision | null = predecision ?? null;
+    const rated = !!rating && (predecision === undefined || predecision === 'accept');
+    if (rated) {
+      const { riskClass, confidence, reason } = rating;
+      if (!riskClass || !confidence || !reason?.trim())
+        return fail(`A proposal that changes code needs riskClass, confidence and reason. Call propose for comment ${commentId} again.`);
+      const ciExhausted = c.kind === 'ci' && pr().ci_attempts >= setting('maxCiAttempts');
+      decision = !ciExhausted && mayDecide(riskClass, confidence, autonomyLimits()) ? 'accept' : null;
+    }
+    db.update('comments', commentId, {
+      state: 'proposal',
+      proposal,
+      reply_draft: null,
+      reply_edited: 0,
+      decision,
+      clarify: clarifying ? 1 : 0,
+      risk: rated ? rating.riskClass! : null,
+      confidence: rated ? rating.confidence! : null,
+      reason: rated ? rating.reason!.trim() : null,
+    });
+    return touched(
+      ok(
+        decision
+          ? `Comment ${commentId} pre-decided: ${decision}.`
+          : `Proposal for comment ${commentId} saved. I will decide on the dashboard.`,
+      ),
     );
   }
 
@@ -200,35 +245,32 @@ export function createAgentTools(
       },
     ),
 
-    def(
-      'propose',
-      'Records how to handle a comment: describe the change you propose, or for no code change what the reply would say. Set predecision when the workflow lets you decide; leave it out to put the decision to me. Do not change code for it yet and do not draft the reply; both follow once every decision of the PR is made. Set clarifying to true when you suggest a reply that asks the reviewer to clarify.',
-      {
-        commentId: z.number(),
-        proposal: z.string(),
-        predecision: z.enum(['accept', 'reject', 'reply', 'skip']).optional(),
-        clarifying: z.boolean().optional(),
-      },
-      async ({ commentId, proposal, predecision, clarifying }) => {
-        const c = ownComment(commentId);
-        if (!c || (c.state !== 'new' && c.state !== 'accepted')) return fail(`Comment ${commentId} is not open.`);
-        db.update('comments', commentId, {
-          state: 'proposal',
-          proposal,
-          reply_draft: null,
-          reply_edited: 0,
-          decision: predecision ?? null,
-          clarify: clarifying ? 1 : 0,
-        });
-        return touched(
-          ok(
-            predecision
-              ? `Comment ${commentId} pre-decided: ${predecision}.`
-              : `Proposal for comment ${commentId} saved. I will decide on the dashboard.`,
-          ),
-        );
-      },
-    ),
+    setting('autonomy')
+      ? def(
+          'propose',
+          'Records how to handle a comment: describe the change you propose, or for no code change what the reply would say. A proposal that changes code carries riskClass, confidence and reason and no predecision: the daemon decides from them whether it is accepted or waits for me. A proposal without a code change carries its predecision instead. Do not change code for it yet and do not draft the reply; both follow once every decision of the PR is made. Set clarifying to true when you suggest a reply that asks the reviewer to clarify.',
+          {
+            commentId: z.number(),
+            proposal: z.string(),
+            predecision: z.enum(['accept', 'reject', 'reply', 'skip']).optional(),
+            clarifying: z.boolean().optional(),
+            riskClass: z.enum(['local', 'contained', 'structural']).optional(),
+            confidence: z.enum(['high', 'medium', 'low']).optional(),
+            reason: z.string().optional(),
+          },
+          async (a) => propose(a.commentId, a.proposal, a.predecision, a.clarifying, a),
+        )
+      : def(
+          'propose',
+          'Records how to handle a comment: describe the change you propose, or for no code change what the reply would say. Set predecision when the workflow lets you decide; leave it out to put the decision to me. Do not change code for it yet and do not draft the reply; both follow once every decision of the PR is made. Set clarifying to true when you suggest a reply that asks the reviewer to clarify.',
+          {
+            commentId: z.number(),
+            proposal: z.string(),
+            predecision: z.enum(['accept', 'reject', 'reply', 'skip']).optional(),
+            clarifying: z.boolean().optional(),
+          },
+          async (a) => propose(a.commentId, a.proposal, a.predecision, a.clarifying),
+        ),
 
     def(
       'reply',
@@ -327,4 +369,25 @@ export function createAgentTools(
   ];
 
   return createSdkMcpServer({ name: AGENT_TOOL_SERVER, version: '1.0.0', tools });
+}
+
+/** The in-process MCP server of a self-review session: one tool, through which it reports its result. */
+export function createReviewTools(onResult: (review: SelfReviewResult) => void) {
+  const report = def(
+    'report_review',
+    'Reports the result of the self-review. Call it exactly once, then finish your turn.',
+    {
+      riskClass: z.enum(['local', 'contained', 'structural']),
+      verdict: z.enum(['pass', 'changes']),
+      route: z.enum(['auto-fixable', 'escalate']).optional(),
+      summary: z.string(),
+      findings: z.array(z.object({ path: z.string().optional(), line: z.number().optional(), body: z.string() })),
+    },
+    async (review) => {
+      if (review.verdict === 'changes' && !review.findings.length) return fail('A verdict of changes needs at least one finding.');
+      onResult(review);
+      return ok('Review saved. Finish your turn now.');
+    },
+  );
+  return createSdkMcpServer({ name: AGENT_TOOL_SERVER, version: '1.0.0', tools: [report] });
 }
