@@ -115,6 +115,8 @@ export interface Finding {
   thread_id: string | null;
   reply_to_db_id: number | null;
   in_diff: number;
+  /** 1 on a thread reply that says the new head settles my point: the thread is resolved when I submit the review. */
+  resolve: number;
   body: string;
   state: 'draft' | 'skipped' | 'submitted';
   created_at: string;
@@ -223,6 +225,7 @@ CREATE TABLE IF NOT EXISTS findings (
   thread_id TEXT,
   reply_to_db_id INTEGER,
   in_diff INTEGER NOT NULL DEFAULT 1,
+  resolve INTEGER NOT NULL DEFAULT 0,
   body TEXT NOT NULL,
   state TEXT NOT NULL DEFAULT 'draft',
   created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
@@ -256,6 +259,7 @@ export function openDb(path = join(config.stateDir, 'pr-manager.db')) {
     ['comments', 'decision', 'TEXT'],
     ['comments', 'outdated', 'INTEGER NOT NULL DEFAULT 0'],
     ['comments', 'diff_hunk', 'TEXT'],
+    ['findings', 'resolve', 'INTEGER NOT NULL DEFAULT 0'],
   ];
   for (const [table, column, type] of migrations) {
     const cols = db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[];

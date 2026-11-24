@@ -3,7 +3,7 @@ import { type TaskSource, checkTask, hasProse } from './checklist.ts';
 import { type Comment, type Db, type Pr, now } from './db.ts';
 import { Blocked, git, isDirty, localChanged, push, rebaseOntoBase, sync } from './git.ts';
 import { GithubError, findingUrl, graphql, rest, viewer } from './github.ts';
-import { changed } from './util.ts';
+import { changed, errorMessage } from './util.ts';
 
 /** New items on one of my PRs: the batch starts at `headSha` unless one is open, and the agent gets to work. */
 export function openBatch(db: Db, prId: number, headSha: string) {
@@ -274,13 +274,34 @@ export function addInstruction(db: Db, pr: Pr, text: string) {
   changed(pr.id);
 }
 
+/**
+ * Queues a new review of a PR I review: a follow-up once I submitted a review, a full review before that.
+ * `reason` is set when the daemon starts it by itself (see `reReviewReason`).
+ */
+export function enqueueReReview(db: Db, pr: Pr, reason?: 'reRequested' | 'pushed') {
+  db.enqueue(pr.id, pr.reviewed_sha ? 'followup_review' : 'review', reason ? { [reason]: true } : undefined);
+  changed(pr.id);
+}
+
+/** A thread holds at most one reply draft: a later one replaces it, so no outdated reply is left to submit. */
+export function draftThreadReply(
+  db: Db,
+  prId: number,
+  reply: { thread_id: string; reply_to_db_id: number; path: string | null; line: number | null; body: string; resolve: boolean },
+) {
+  db.transaction(() => {
+    db.run(`DELETE FROM findings WHERE pr_id = ? AND kind = 'thread_reply' AND thread_id = ? AND state = 'draft'`, prId, reply.thread_id);
+    db.insert('findings', { pr_id: prId, kind: 'thread_reply', ...reply, resolve: reply.resolve ? 1 : 0 });
+  });
+}
+
 export interface ReviewInput {
   verdict: 'APPROVE' | 'REQUEST_CHANGES' | 'COMMENT';
   body: string;
   findings: { id: number; body: string; skip: boolean }[];
 }
 
-/** Posts the review draft as one GitHub review, then the drafted thread replies. */
+/** Posts the review draft as one GitHub review, then the drafted thread replies, and resolves the threads they settle. */
 export async function submitReview(db: Db, pr: Pr, input: ReviewInput) {
   if (pr.review_state !== 'draft') throw new Error('There is no review draft to submit.');
   const edits = new Map(input.findings.map((f) => [f.id, f]));
@@ -304,6 +325,9 @@ export async function submitReview(db: Db, pr: Pr, input: ReviewInput) {
   }
   for (const r of replies) {
     await rest('POST', `/repos/${pr.repo}/pulls/${pr.number}/comments/${r.reply_to_db_id}/replies`, { body: r.body });
+    // The reply is posted and says why; a thread GitHub does not let me resolve stays open for the author.
+    if (r.resolve && r.thread_id)
+      await resolveThread(r.thread_id).catch((e) => console.warn(`resolve thread on ${pr.repo}#${pr.number}: ${errorMessage(e)}`));
   }
   db.transaction(() => {
     for (const f of all) db.update('findings', f.id, { state: edits.get(f.id)?.skip ? 'skipped' : 'submitted' });

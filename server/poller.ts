@@ -1,6 +1,6 @@
 import { deleteSession } from '@anthropic-ai/claude-agent-sdk';
-import { addConflict, openBatch } from './actions.ts';
-import { batchStatus, buildGreen, readyToClose } from './batch.ts';
+import { addConflict, enqueueReReview, openBatch } from './actions.ts';
+import { batchStatus, buildGreen, reReviewReason, readyToClose } from './batch.ts';
 import { type TaskSource, hasTasks, parseTasks, taskKeys } from './checklist.ts';
 import { type Comment, type Db, type Pr, type PrState, now } from './db.ts';
 import { Blocked, removeWorktree } from './git.ts';
@@ -115,9 +115,9 @@ export function createPoller({ db, dashboardUrl }: PollerDeps) {
       prev.check_state !== fields.check_state ||
       prev.state !== state;
 
-    // A review request withdrawn or filtered out before I submitted a review: nothing left to do on this PR.
-    const newState: PrState =
-      role === 'review' && state === 'open' && !inReviewSearch && prev.review_state !== 'submitted' ? 'dropped' : state;
+    // A review request withdrawn or filtered out before I ever submitted a review: nothing left to do on this PR.
+    // Once I reviewed it, it stays, also while a later draft is open.
+    const newState: PrState = role === 'review' && state === 'open' && !inReviewSearch && !prev.reviewed_sha ? 'dropped' : state;
     db.update('prs', pr.id, { ...fields, state: newState });
     pr = db.pr(pr.id)!;
 
@@ -150,8 +150,8 @@ export function createPoller({ db, dashboardUrl }: PollerDeps) {
         db.enqueue(pr.id, 'review');
       }
       // GitHub drops a PR from review-requested once I reviewed it; showing up again is a re-request.
-      if (!pr.ignored && setting('autoFollowupOnReRequest') && pr.review_state === 'submitted' && inReviewSearch && !prev.in_review_search)
-        db.enqueue(pr.id, 'followup_review', { reRequested: true });
+      const reason = !pr.ignored && setting('autoFollowupOnReRequest') ? reReviewReason(prev, inReviewSearch, gh.headRefOid) : null;
+      if (reason) enqueueReReview(db, pr, reason);
       if (isChanged && pr.review_state === 'submitted') await checkReviewOutOfDate(pr, me);
     }
     if (isChanged) changed(pr.id);

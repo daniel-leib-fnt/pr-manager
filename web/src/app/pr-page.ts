@@ -175,8 +175,8 @@ function saveDraft(id: number, draft: Draft) {
                 </button>
                 @if (menuOpen()) {
                   <div class="menu" role="menu">
-                    @if (d.pr.role === 'review' && d.pr.review_state === 'submitted') {
-                      <button role="menuitem" (click)="act('followup-review')">Follow-up review</button>
+                    @if (d.pr.role === 'review') {
+                      <button role="menuitem" (click)="act('followup-review')">Review again</button>
                     }
                     @if (d.pr.session_id && !d.pr.agent_running) {
                       <button role="menuitem" (click)="confirmAct('reset-session', 'Start a fresh agent session for this PR?')">
@@ -211,6 +211,12 @@ function saveDraft(id: number, draft: Draft) {
           }
           @if (d.pr.review_out_of_date) {
             <div class="banner">The review is out of date: new commits or replies since my review.</div>
+          }
+          @if (d.pr.review_state === 'draft' && d.pr.review_draft_sha && d.pr.review_draft_sha !== d.pr.head_sha) {
+            <div class="banner">
+              The review draft was written for an older commit.
+              <button class="link" (click)="act('followup-review')">Review again</button>
+            </div>
           }
           @if (error()) {
             <div class="banner error">{{ error() }}</div>
@@ -611,6 +617,9 @@ function saveDraft(id: number, draft: Draft) {
                 @if (f.kind === 'finding' && !f.in_diff) {
                   <span class="tag small warn">outside the diff, goes into the body</span>
                 }
+                @if (f.resolve) {
+                  <span class="tag small">resolves the thread</span>
+                }
                 <span class="end">
                   <label class="switch">
                     <input type="checkbox" [ngModel]="!finding(f).skip" (ngModelChange)="finding(f).skip = !$event; persist()" />
@@ -648,7 +657,7 @@ function saveDraft(id: number, draft: Draft) {
                 · out of date since then
               }
             </p>
-            <button (click)="act('followup-review')">Follow-up review</button>
+            <button (click)="act('followup-review')">Review again</button>
           </section>
         } @else {
           <p class="muted">The agent has not drafted a review yet.</p>

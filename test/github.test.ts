@@ -15,7 +15,7 @@ test('files without a patch have no commentable lines', () => {
 
 test('finding links point to the diff line, the file line, or the thread', () => {
   const pr = { url: 'https://github.com/o/r/pull/7', repo: 'o/r', review_draft_sha: 'abc', head_sha: 'def' } as never;
-  const base = { id: 1, pr_id: 1, thread_id: null, reply_to_db_id: null, body: '', state: 'draft', created_at: '' } as const;
+  const base = { id: 1, pr_id: 1, thread_id: null, reply_to_db_id: null, resolve: 0, body: '', state: 'draft', created_at: '' } as const;
   const hash = createHash('sha256').update('src/a.kt').digest('hex');
   assert.equal(
     findingUrl(pr, { ...base, kind: 'finding', path: 'src/a.kt', line: 12, in_diff: 1 }),

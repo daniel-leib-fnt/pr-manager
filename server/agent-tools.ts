@@ -3,7 +3,8 @@ import { z } from 'zod';
 import { hasProse } from './checklist.ts';
 import type { Db } from './db.ts';
 import { setting } from './settings.ts';
-import { type GhPrDetail, commentableLines, prDetail, prFiles, rest } from './github.ts';
+import { draftThreadReply } from './actions.ts';
+import { type GhPrDetail, commentableLines, prDetail, prFiles, rest, viewer } from './github.ts';
 import { changed, errorMessage } from './util.ts';
 
 const ok = (text: string) => ({ content: [{ type: 'text' as const, text }] });
@@ -26,8 +27,23 @@ type Shape = Parameters<typeof tool>[2];
 const def = <S extends Shape>(name: string, description: string, schema: S, handler: Parameters<typeof tool<S>>[3]) =>
   tool(name, description, schema, handler, { alwaysLoad: true });
 
+/** The unsent review draft that a review run replaces. */
+export interface PreviousDraft {
+  commit: string | null;
+  verdict: string | null;
+  body: string | null;
+  findings: { path: string | null; line: number | null; body: string }[];
+  threadReplies: { threadId: string | null; body: string; resolve: boolean }[];
+}
+
 /** The in-process MCP server through which a session reports results for one PR. */
-export function createAgentTools(db: Db, prId: number, onBlocked: (reason: string) => void, onReviewDraft: () => void) {
+export function createAgentTools(
+  db: Db,
+  prId: number,
+  onBlocked: (reason: string) => void,
+  onReviewDraft: () => void,
+  previousDraft?: PreviousDraft,
+) {
   let detail: GhPrDetail | undefined;
   let lines: Map<string, Set<number>> | undefined;
   const pr = () => db.pr(prId)!;
@@ -99,8 +115,10 @@ export function createAgentTools(db: Db, prId: number, onBlocked: (reason: strin
           .map((q) => ({ question: q.question, answer: q.answer, commentId: q.comment_id }));
         return ok(JSON.stringify({ ...base, openItems: items, answeredQuestions: answered }, null, 2));
       }
+      const me = await viewer();
       const threads = d.reviewThreads.nodes.map((t) => ({
         threadId: t.id,
+        mine: t.comments.nodes[0]?.author?.login === me,
         resolved: t.isResolved,
         path: t.path,
         line: t.line ?? t.originalLine,
@@ -117,6 +135,10 @@ export function createAgentTools(db: Db, prId: number, onBlocked: (reason: strin
             previousReview: p.reviewed_sha
               ? { commit: p.reviewed_sha, at: p.reviewed_at, changesSince: `git diff ${p.reviewed_sha}..HEAD` }
               : null,
+            myReviewBodies: d.reviews.nodes
+              .filter((r) => r.author?.login === me && r.body.trim())
+              .map((r) => ({ at: r.submittedAt ?? r.createdAt, commit: r.commit?.oid ?? null, body: r.body })),
+            ...(previousDraft ? { previousDraft } : {}),
             threads,
             instructions,
           },
@@ -259,19 +281,18 @@ export function createAgentTools(db: Db, prId: number, onBlocked: (reason: strin
 
     def(
       'draft_thread_reply',
-      'Drafts my reply to the author in an existing review thread.',
-      { threadId: z.string(), body: z.string() },
-      async ({ threadId, body }) => {
+      'Drafts my reply to the author in an existing review thread; a thread holds one draft, so a new one replaces it. Set resolve to true when the code at HEAD settles my point: the thread is then resolved when I submit the review.',
+      { threadId: z.string(), body: z.string(), resolve: z.boolean().optional() },
+      async ({ threadId, body, resolve }) => {
         const t = (await loadDetail()).reviewThreads.nodes.find((x) => x.id === threadId);
         if (!t || !t.comments.nodes[0]) return fail(`Unknown thread ${threadId}.`);
-        db.insert('findings', {
-          pr_id: prId,
-          kind: 'thread_reply',
+        draftThreadReply(db, prId, {
           thread_id: threadId,
           reply_to_db_id: t.comments.nodes[0].databaseId,
           path: t.path,
           line: t.line ?? t.originalLine,
           body,
+          resolve: !!resolve,
         });
         onReviewDraft();
         return touched(ok('Reply drafted.'));
