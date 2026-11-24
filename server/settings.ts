@@ -125,6 +125,7 @@ export const DEFS = {
   autoFollowupOnReRequest: def({
     group: 'Reviews',
     label: 'Follow-up review when my review is re-requested',
+    help: 'Also writes an unsent review draft again when the PR is pushed to while the request is open.',
     type: 'boolean',
     schema: z.boolean(),
     default: true,

@@ -2,12 +2,13 @@ import { randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, realpathSync } from 'node:fs';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { type Options, type SDKResultMessage, query } from '@anthropic-ai/claude-agent-sdk';
-import { AGENT_TOOL_SERVER, createAgentTools } from './agent-tools.ts';
+import { AGENT_TOOL_SERVER, type PreviousDraft, createAgentTools } from './agent-tools.ts';
 import { adoptBatchHead, applyPredecisions, closeBatch } from './actions.ts';
 import { runnable } from './batch.ts';
 import { config, extraMcpServers } from './config.ts';
 import { type Db, type Pr, type WorkItem, type WorkKind, now } from './db.ts';
 import { Blocked, ensureWorktree, fetchBase, git, interactiveSessionsIn, isDirty, sync } from './git.ts';
+import { draftThreads, prDetail, viewer } from './github.ts';
 import type { Poller } from './poller.ts';
 import { isExcluded, recordDenied, setting, workflowPrompt } from './settings.ts';
 import { bus, changed, errorMessage, notify } from './util.ts';
@@ -147,16 +148,28 @@ export function createRunner({ db, poller, dashboardUrl }: RunnerDeps) {
       parts.push(
         'There is new activity on this PR. Call get_pr and handle every open item as the workflow describes. Update the summary if it is outdated.',
       );
+    if (items.some((i) => i.kind === 'comments' && i.payload?.includes('pushed')))
+      parts.push(
+        'The branch was pushed to from outside pr-manager. Items you triaged before are open again: judge each against the code at HEAD, as the workflow describes for a push.',
+      );
     if (kinds.has('answers'))
       parts.push(
         'All decisions are made. Call get_pr: implement accepted proposals and instructions, write the replies for rejected and replied items, use my answers to continue with the open items.',
       );
+    const why = (kind: WorkKind, reason: string) => items.some((i) => i.kind === kind && i.payload?.includes(reason));
+    const pushed = 'The PR was pushed to before I submitted my review draft, so the draft is written again for the new head.';
     if (kinds.has('review'))
-      parts.push('My review was requested. Call get_pr, review the full diff, and write the review draft as the workflow describes.');
-    if (kinds.has('followup_review')) {
-      const reRequested = items.some((i) => i.kind === 'followup_review' && i.payload?.includes('reRequested'));
       parts.push(
-        `${reRequested ? 'My review was re-requested.' : 'I asked for a follow-up review.'} Call get_pr and review only the changes since my previous review. Draft replies for author responses in my threads with draft_thread_reply.`,
+        `${why('review', 'pushed') ? pushed : 'My review was requested.'} Call get_pr, review the full diff, and write the review draft as the workflow describes.`,
+      );
+    if (kinds.has('followup_review')) {
+      const lead = why('followup_review', 'reRequested')
+        ? 'My review was re-requested.'
+        : why('followup_review', 'pushed')
+          ? pushed
+          : 'I asked for a follow-up review.';
+      parts.push(
+        `${lead} Call get_pr and write the follow-up review as the workflow describes: first judge every point of mine that is still open against the code at HEAD, then review the changes since my previous review.`,
       );
     }
     return parts.join('\n\n');
@@ -172,7 +185,20 @@ export function createRunner({ db, poller, dashboardUrl }: RunnerDeps) {
       throw e;
     }
     const reviewRun = kinds.has('review') || kinds.has('followup_review');
+    // A review run writes the draft anew. What the unsent one said goes to the agent, which judges it against the new head.
+    let previousDraft: PreviousDraft | undefined;
     if (reviewRun) {
+      const drafts = db.findings(pr.id).filter((f) => f.state === 'draft');
+      if (pr.review_state === 'draft')
+        previousDraft = {
+          commit: pr.review_draft_sha,
+          verdict: pr.review_verdict,
+          body: pr.review_body,
+          findings: drafts.filter((f) => f.kind === 'finding').map((f) => ({ path: f.path, line: f.line, body: f.body })),
+          threadReplies: drafts
+            .filter((f) => f.kind === 'thread_reply')
+            .map((f) => ({ threadId: f.thread_id, body: f.body, resolve: !!f.resolve })),
+        };
       db.run(`DELETE FROM findings WHERE pr_id = ?`, pr.id);
       db.update('prs', pr.id, {
         review_state: 'none',
@@ -232,6 +258,7 @@ export function createRunner({ db, poller, dashboardUrl }: RunnerDeps) {
             pr.id,
             (reason) => block(db.pr(pr.id)!, reason),
             () => (reviewDrafted = true),
+            previousDraft,
           ),
         },
         canUseTool: async (name, input) => {
@@ -269,13 +296,31 @@ export function createRunner({ db, poller, dashboardUrl }: RunnerDeps) {
     if (!error) {
       for (const id of answeredIds) db.update('questions', id, { state: 'sent' });
       const current = db.pr(pr.id)!;
-      if (!reviewRun && reviewDrafted && current.role === 'review' && current.review_state !== 'draft')
+      // The draft is submitted for the commit the agent last looked at, or GitHub rejects findings on files added since.
+      if (!reviewRun && reviewDrafted && current.role === 'review')
         db.update('prs', pr.id, { review_draft_sha: await git(path, ['rev-parse', 'HEAD']) });
+      if (current.role === 'review' && (reviewRun || reviewDrafted)) await snapshotThreads(current);
       afterRun(db.pr(pr.id)!, kinds, openAtStart, reviewDrafted);
     } else {
       notify('error', `Agent error: ${pr.repo}#${pr.number}`, error.slice(0, 300), prUrl(pr), `agent-error:${pr.id}`);
     }
     changed(pr.id);
+  }
+
+  /** Keeps the threads the review draft is about, so the dashboard shows what a reply answers and which threads got none. */
+  async function snapshotThreads(pr: Pr) {
+    try {
+      const replied = new Set(
+        db
+          .findings(pr.id)
+          .filter((f) => f.state === 'draft' && f.thread_id)
+          .map((f) => f.thread_id!),
+      );
+      const threads = draftThreads(await prDetail(pr.repo, pr.number), await viewer(), replied);
+      db.update('prs', pr.id, { review_threads: JSON.stringify(threads) });
+    } catch (e) {
+      console.warn(`threads of ${pr.repo}#${pr.number}: ${errorMessage(e)}`);
+    }
   }
 
   /** Compacts the session; a failure only costs a larger context on the next run. */

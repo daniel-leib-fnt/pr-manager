@@ -1,7 +1,7 @@
 import { DatePipe, NgTemplateOutlet } from '@angular/common';
 import { Component, computed, effect, inject, input, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import { Api, type Comment, type Finding, type PrDetail, type Question } from './api';
+import { Api, type Comment, type Finding, type PrDetail, type Question, type ReviewThread } from './api';
 import { Ci } from './ci';
 import { CodeExcerpt } from './code-excerpt';
 import { plural } from './pr-view';
@@ -175,8 +175,10 @@ function saveDraft(id: number, draft: Draft) {
                 </button>
                 @if (menuOpen()) {
                   <div class="menu" role="menu">
-                    @if (d.pr.role === 'review' && d.pr.review_state === 'submitted') {
-                      <button role="menuitem" (click)="act('followup-review')">Follow-up review</button>
+                    @if (d.pr.role === 'review') {
+                      <button role="menuitem" (click)="act('followup-review')">Review again</button>
+                    } @else if (d.pr.counts.proposals || d.pr.counts.questions) {
+                      <button role="menuitem" (click)="act('followup-review')">Check open items again</button>
                     }
                     @if (d.pr.session_id && !d.pr.agent_running) {
                       <button role="menuitem" (click)="confirmAct('reset-session', 'Start a fresh agent session for this PR?')">
@@ -211,6 +213,12 @@ function saveDraft(id: number, draft: Draft) {
           }
           @if (d.pr.review_out_of_date) {
             <div class="banner">The review is out of date: new commits or replies since my review.</div>
+          }
+          @if (d.pr.review_state === 'draft' && d.pr.review_draft_sha && d.pr.review_draft_sha !== d.pr.head_sha) {
+            <div class="banner">
+              The review draft was written for an older commit.
+              <button class="link" (click)="act('followup-review')">Review again</button>
+            </div>
           }
           @if (error()) {
             <div class="banner error">{{ error() }}</div>
@@ -569,13 +577,33 @@ function saveDraft(id: number, draft: Draft) {
                     }
                     <textarea rows="2" placeholder="Answer" [(ngModel)]="draft().answers[q.id]" (ngModelChange)="persist()"></textarea>
                   } @else {
-                    <p class="muted small">Answer: {{ q.answer }}</p>
+                    <p class="muted small">{{ q.state === 'withdrawn' ? 'Withdrawn' : 'Answer' }}: {{ q.answer }}</p>
                   }
                 }
               </div>
             }
           </article>
         }
+      </ng-template>
+
+      <ng-template #threadTpl let-t>
+        @if (t.excerpt) {
+          <app-code-excerpt [excerpt]="t.excerpt" [path]="t.path" />
+        }
+        <div class="conversation">
+          @for (m of t.comments; track $index) {
+            <div class="bubble">
+              <span class="avatar">{{ m.author.slice(0, 2) }}</span>
+              <div class="bubble-body">
+                <div class="bubble-meta">
+                  <strong>{{ m.author }}</strong>
+                  · {{ m.at | date: 'dd.MM. HH:mm' }}
+                </div>
+                <p class="bubble-text">{{ m.body }}</p>
+              </div>
+            </div>
+          }
+        </div>
       </ng-template>
 
       <ng-template #reviewTpl>
@@ -611,6 +639,9 @@ function saveDraft(id: number, draft: Draft) {
                 @if (f.kind === 'finding' && !f.in_diff) {
                   <span class="tag small warn">outside the diff, goes into the body</span>
                 }
+                @if (f.resolve) {
+                  <span class="tag small">resolves the thread</span>
+                }
                 <span class="end">
                   <label class="switch">
                     <input type="checkbox" [ngModel]="!finding(f).skip" (ngModelChange)="finding(f).skip = !$event; persist()" />
@@ -624,7 +655,9 @@ function saveDraft(id: number, draft: Draft) {
                 </div>
               } @else {
                 <div class="dcard-body">
-                  @if (f.excerpt && f.path) {
+                  @if (threadOf(f); as t) {
+                    <ng-container *ngTemplateOutlet="threadTpl; context: { $implicit: t }" />
+                  } @else if (f.excerpt && f.path) {
                     <app-code-excerpt [excerpt]="f.excerpt" [path]="f.path" />
                   }
                   <textarea
@@ -639,6 +672,30 @@ function saveDraft(id: number, draft: Draft) {
           } @empty {
             <p class="muted">No findings.</p>
           }
+          @if (unansweredThreads().length) {
+            <div class="list-head">
+              <h2>My open threads without a reply</h2>
+              <span>{{ unansweredThreads().length }} still open, left as they are</span>
+            </div>
+            @for (t of unansweredThreads(); track t.threadId) {
+              <article class="dcard">
+                <div class="dcard-head">
+                  <span class="path" [title]="t.path + ':' + t.line">
+                    <bdi>
+                      {{ t.path }}
+                      <strong>:{{ t.line }}</strong>
+                    </bdi>
+                  </span>
+                  @if (t.url) {
+                    <a [href]="t.url" target="_blank" rel="noopener" class="small">View on GitHub ↗</a>
+                  }
+                </div>
+                <div class="dcard-body">
+                  <ng-container *ngTemplateOutlet="threadTpl; context: { $implicit: t }" />
+                </div>
+              </article>
+            }
+          }
         } @else if (d.pr.review_state === 'submitted') {
           <section class="card">
             <h2>Review submitted</h2>
@@ -648,7 +705,7 @@ function saveDraft(id: number, draft: Draft) {
                 · out of date since then
               }
             </p>
-            <button (click)="act('followup-review')">Follow-up review</button>
+            <button (click)="act('followup-review')">Review again</button>
           </section>
         } @else {
           <p class="muted">The agent has not drafted a review yet.</p>
@@ -829,6 +886,17 @@ export class PrPage {
     if (c.note?.startsWith('Dismissed')) return { text: 'Dismissed', cls: '' };
     return { text: 'Done', cls: '' };
   }
+
+  /** The thread a reply draft answers. */
+  protected threadOf(f: Finding): ReviewThread | undefined {
+    return f.thread_id ? this.data()?.threads.find((t) => t.threadId === f.thread_id) : undefined;
+  }
+
+  /** My unresolved threads the draft does not reply to: the agent judged them as still open, with nothing to answer. */
+  protected readonly unansweredThreads = computed(() => {
+    const replied = new Set(this.draftFindings().map((f) => f.thread_id));
+    return (this.data()?.threads ?? []).filter((t) => !t.resolved && !replied.has(t.threadId));
+  });
 
   protected conversation(c: Comment) {
     return messages(c);

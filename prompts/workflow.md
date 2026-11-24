@@ -8,7 +8,7 @@ Report results only through the `mcp__pr__*` tools. Prose in your final message 
 
 - `get_pr` gives you the PR, the open items with their `commentId`, and my answers.
 - `set_summary` keeps the dashboard summary current: what the PR changes and why, 3 to 6 sentences.
-- `mark_fixed`, `reply`, `dismiss`, `propose` and `ask` settle comments on my own PRs.
+- `mark_fixed`, `reply`, `dismiss`, `propose`, `ask` and `withdraw_question` settle comments on my own PRs.
 - `add_review_finding`, `set_review_verdict` and `draft_thread_reply` build a review draft on PRs I review.
 - `report_blocked` stops work on the PR until I intervene.
 
@@ -62,6 +62,13 @@ Decided items, by me or by your pre-decision, carry the decision in `state`; `ac
 
 When an item carries `myReply`, I wrote the reply myself and the daemon posts it as is; still pass a short reply of your own, it is ignored.
 
+**After a push from outside pr-manager**, for example when I fixed something by hand, items you triaged before come back with state `new`, and `openQuestions` lists what you asked and I have not answered. Judge each against the code at HEAD instead of repeating your earlier proposal:
+
+- The push settles the item: case 6, "Already done", naming the commit. The reply you write after the decision then says what changed, so the reviewer gets an answer although I did not reply myself.
+- The push settles it in part: `propose` only what remains, and say what is done.
+- Nothing changed for it: `propose` as before.
+- A question the push settles: `withdraw_question` with the reason, then triage the item it belongs to.
+
 **Merge conflict items** (kind `conflict`): the PR does not rebase cleanly onto its base. Rebase onto the base ref named in the item with `git rebase`. Resolve conflicts that are mechanical, such as imports, neighboring edits or both sides adding entries, and keep the intent of both sides. Run the checks for the files you touched, then `mark_fixed` with an empty reply. The daemon pushes the rebased branch with the batch. If resolving a conflict needs a decision about behavior, run `git rebase --abort` and `propose` with what conflicts and the resolution you suggest.
 
 **Failed CI items** carry the failing logs. They are no decision: when the fix is small, fix it right away and call `mark_fixed`; otherwise, and always when `autoFixAllowed` is false, `propose` without a predecision.
@@ -85,5 +92,16 @@ When an item carries `myReply`, I wrote the reply myself and the daemon posts it
 
 {{REVIEW_GUIDELINES}}
 
-- **Follow-up review:** look only at the changes since `previousReview.commit`. Draft replies to author responses in my threads with `draft_thread_reply`. Add findings only for new problems.
+- **Follow-up review:** I reviewed this PR before. Do not look at the new changes alone: first judge every point of mine that is still open against the code at HEAD. My open points are:
+  - my unresolved threads: `threads` with `mine: true` and `resolved: false`,
+  - the points in the bodies of my earlier reviews (`myReviewBodies`) that no later review of mine reports as done,
+  - the findings and replies of `previousDraft`, see below.
+
+  Decide for each point:
+  - **Done:** the code at HEAD settles it. In a thread, call `draft_thread_reply` with `resolve: true` and a short reply that names the commit and the file that settle it. A point from a review body gets one line in the new review body.
+  - **Still open:** in a thread, draft a reply when the author responded and an answer is due; otherwise leave the thread alone. A point from a review body becomes a finding again.
+  - **Partly done:** close the old point as done, saying what is settled, and add a new finding for exactly what remains.
+
+  Only the code settles a point. An author's reply without a code change gets an answer, not `resolve: true`. Afterwards review the changes since `previousReview.commit` (`changesSince`) and add findings only for new problems. Set the verdict for the PR as it stands now.
+- **`previousDraft`:** a review draft I never submitted, written for an older head (`commit`). It is discarded, and this run writes the draft anew. Judge its findings and replies like the points above: write again what still holds at HEAD, adjust what holds only in part, and drop what the new head settles. Never keep a reply that the code at HEAD contradicts.
 - **Never change code** in a PR I review, and never commit there.

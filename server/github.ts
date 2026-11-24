@@ -279,6 +279,38 @@ export async function prFiles(repo: string, number: number): Promise<PrFile[]> {
   return out;
 }
 
+/** A review thread as the dashboard shows it next to my review draft. */
+export interface ReviewThread {
+  threadId: string;
+  path: string;
+  line: number | null;
+  /** 1 when the commented line no longer exists at the PR head. */
+  outdated: number;
+  diff_hunk: string | null;
+  resolved: boolean;
+  url: string | null;
+  comments: { author: string; at: string; body: string }[];
+}
+
+/**
+ * The threads a review draft is about: the ones I started that are not resolved, whether the draft replies to
+ * them or leaves them alone, and any other thread it replies to.
+ */
+export function draftThreads(d: Pick<GhPrDetail, 'reviewThreads'>, me: string, replied: Set<string>): ReviewThread[] {
+  return d.reviewThreads.nodes
+    .filter((t) => replied.has(t.id) || (!t.isResolved && t.comments.nodes[0]?.author?.login === me))
+    .map((t) => ({
+      threadId: t.id,
+      path: t.path,
+      line: t.line ?? t.originalLine,
+      outdated: t.line === null ? 1 : 0,
+      diff_hunk: t.comments.nodes[0]?.diffHunk ?? null,
+      resolved: t.isResolved,
+      url: t.comments.nodes[0]?.url ?? null,
+      comments: t.comments.nodes.map((c) => ({ author: c.author?.login ?? 'ghost', at: c.createdAt, body: c.body })),
+    }));
+}
+
 /** Link to where a review finding points: the diff line, the file line outside the diff, or the thread. */
 export function findingUrl(pr: Pr, f: Finding): string | null {
   if (f.kind === 'thread_reply') return f.reply_to_db_id ? `${pr.url}#discussion_r${f.reply_to_db_id}` : null;

@@ -2,12 +2,20 @@ import { existsSync, readFileSync, statSync } from 'node:fs';
 import { type IncomingMessage, type ServerResponse, createServer } from 'node:http';
 import { extname, join, normalize } from 'node:path';
 import { getSessionMessages } from '@anthropic-ai/claude-agent-sdk';
-import { type ReviewInput, type SubmitInput, addInstruction, submitDecisions, submitReview } from './actions.ts';
+import {
+  type ReviewInput,
+  type SubmitInput,
+  addInstruction,
+  enqueueReReview,
+  recheckAfterPush,
+  submitDecisions,
+  submitReview,
+} from './actions.ts';
 import { batchStatus, buildGreen, runnable } from './batch.ts';
 import { config } from './config.ts';
 import type { Db, Pr } from './db.ts';
 import { commentExcerpt, excerpt } from './excerpt.ts';
-import { findingUrl } from './github.ts';
+import { type ReviewThread, findingUrl } from './github.ts';
 import type { Poller } from './poller.ts';
 import type { Runner } from './runner.ts';
 import { deniedCalls, describeNixOnly, describeSettings, isExcluded, resetOverride, saveOverrides } from './settings.ts';
@@ -35,10 +43,18 @@ function groupOf(db: Db, pr: Pr): Group {
   return 'waiting';
 }
 
+/** The threads of the review draft, each with its code excerpt. */
+function reviewThreads(pr: Pr) {
+  const threads = JSON.parse(pr.review_threads ?? '[]') as ReviewThread[];
+  return threads.map(({ diff_hunk, ...t }) => ({ ...t, excerpt: commentExcerpt(pr.worktree, { ...t, diff_hunk }) }));
+}
+
 function summary(db: Db, pr: Pr, running: boolean) {
   const comments = db.comments(pr.id);
+  // The threads are part of the PR page only; the list does not carry them.
+  const { review_threads: _threads, ...fields } = pr;
   return {
-    ...pr,
+    ...fields,
     group: groupOf(db, pr),
     running,
     counts: {
@@ -96,6 +112,7 @@ export function createHttp({ db, poller, runner }: { db: Db; poller: Poller; run
       comments: db.comments(pr.id).map((c) => ({ ...c, excerpt: commentExcerpt(pr.worktree, c) })),
       questions: db.questions(pr.id),
       findings: db.findings(pr.id).map((f) => ({ ...f, url: findingUrl(pr, f), excerpt: excerpt(pr.worktree, f.path, f.line) })),
+      threads: reviewThreads(pr),
       work: db.workItems(pr.id).slice(-30),
     }),
     'GET transcript': async (_q, _r, pr) => {
@@ -116,8 +133,8 @@ export function createHttp({ db, poller, runner }: { db: Db; poller: Poller; run
       await submitReview(db, pr, await readJson<ReviewInput>(req));
     },
     'POST followup-review': async (_q, _r, pr) => {
-      db.enqueue(pr.id, 'followup_review');
-      changed(pr.id);
+      if (pr.role === 'review') enqueueReReview(db, pr);
+      else if (!recheckAfterPush(db, pr)) throw new Error('No open proposal or question to check again.');
       runner.wake();
     },
     'POST pause': async (_q, _r, pr) => {

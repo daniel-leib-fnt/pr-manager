@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { batchStatus, readyToClose, replyFor, shouldResolve } from '../server/batch.ts';
+import { batchStatus, reReviewReason, readyToClose, replyFor, shouldResolve } from '../server/batch.ts';
 import type { Comment, Pr, Question, WorkItem } from '../server/db.ts';
 
 const comment = (over: Partial<Comment>): Comment => ({
@@ -120,4 +120,19 @@ test('a thread with checklist lines is resolved once, after its last line is set
   assert.equal(shouldResolve(a, [a, skipped]), false);
   const earlier = comment({ id: 2, state: 'done', task: 'b' });
   assert.equal(shouldResolve(a, [a, earlier]), true);
+});
+
+test('a new review starts on a re-request, and on a push only while my draft answers an open request', () => {
+  const prev = (review_state: Pr['review_state'], in_review_search: number) => ({ review_state, in_review_search, head_sha: 'a1' });
+  assert.equal(reReviewReason(prev('submitted', 0), true, 'a1'), 'reRequested');
+  assert.equal(reReviewReason(prev('draft', 0), true, 'a1'), 'reRequested', 'a draft does not hide the re-request');
+  assert.equal(reReviewReason(prev('draft', 1), true, 'a2'), 'pushed');
+  assert.equal(reReviewReason(prev('draft', 1), true, 'a1'), null);
+  assert.equal(reReviewReason(prev('submitted', 0), false, 'a2'), null, 'a push after a submitted review starts nothing');
+  assert.equal(reReviewReason(prev('draft', 0), false, 'a2'), null, 'a draft without a request is not renewed');
+  assert.equal(reReviewReason(prev('none', 1), true, 'a2'), null, 'the first review has its own trigger');
+});
+
+test('a withdrawn question does not keep the batch open', () => {
+  assert.equal(batchStatus([comment({ state: 'fixed' })], [question('withdrawn')], []), 'closable');
 });

@@ -13,6 +13,7 @@ export interface Pr {
   author: string;
   role: 'own' | 'review';
   head_ref: string;
+  head_sha: string;
   base_ref: string;
   is_draft: number;
   state: 'open' | 'merged' | 'closed' | 'dropped';
@@ -26,6 +27,8 @@ export interface Pr {
   review_state: 'none' | 'draft' | 'submitted';
   review_verdict: 'APPROVE' | 'REQUEST_CHANGES' | 'COMMENT' | null;
   review_body: string | null;
+  /** The commit the review draft was written for. */
+  review_draft_sha: string | null;
   reviewed_sha: string | null;
   review_out_of_date: number;
   ignored: number;
@@ -76,18 +79,32 @@ export interface Question {
   question: string;
   options: string | null;
   answer: string | null;
-  state: 'open' | 'answered' | 'sent';
+  state: 'open' | 'answered' | 'sent' | 'withdrawn';
 }
 
 export interface Finding {
   id: number;
   kind: 'finding' | 'thread_reply';
+  thread_id: string | null;
   path: string | null;
   line: number | null;
   in_diff: number;
+  /** 1 on a thread reply whose thread is resolved when the review is submitted. */
+  resolve: number;
   body: string;
   state: 'draft' | 'skipped' | 'submitted';
   url: string | null;
+  excerpt: Excerpt | null;
+}
+
+/** A review thread my review draft is about, as it was when the agent last wrote to the draft. */
+export interface ReviewThread {
+  threadId: string;
+  path: string;
+  line: number | null;
+  resolved: boolean;
+  url: string | null;
+  comments: { author: string; at: string; body: string }[];
   excerpt: Excerpt | null;
 }
 
@@ -105,6 +122,7 @@ export interface PrDetail {
   comments: Comment[];
   questions: Question[];
   findings: Finding[];
+  threads: ReviewThread[];
   work: WorkItem[];
 }
 

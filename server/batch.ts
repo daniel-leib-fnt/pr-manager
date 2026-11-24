@@ -9,6 +9,21 @@ const REVIEW_KINDS = new Set<WorkKind>(['review', 'followup_review']);
 /** Whether a queued item may run now; reviews are held back until the build is green. */
 export const runnable = (pr: Pick<Pr, 'check_state'>, kind: WorkKind) => !REVIEW_KINDS.has(kind) || buildGreen(pr);
 
+/**
+ * Why a new review starts by itself on a PR I review: my review was re-requested, or the head moved while a
+ * request is unanswered and my draft, written for the old head, is not submitted. A push after a submitted
+ * review starts nothing: the author asks again when the PR is ready.
+ */
+export function reReviewReason(
+  prev: Pick<Pr, 'review_state' | 'in_review_search' | 'head_sha'>,
+  inReviewSearch: boolean,
+  headSha: string,
+): 'reRequested' | 'pushed' | null {
+  if (!inReviewSearch || prev.review_state === 'none') return null;
+  if (!prev.in_review_search) return 'reRequested';
+  return prev.review_state === 'draft' && prev.head_sha !== headSha ? 'pushed' : null;
+}
+
 /** Comments that still need the agent or me before the batch can be pushed. */
 const OPEN_STATES = new Set(['new', 'proposal', 'accepted']);
 /** Comments whose result (push, reply, resolve) still has to reach GitHub. */
@@ -19,7 +34,7 @@ type BatchStatus = 'none' | 'open' | 'closable';
 export function batchStatus(comments: Comment[], questions: Question[], work: WorkItem[]): BatchStatus {
   const open =
     comments.some((c) => OPEN_STATES.has(c.state)) ||
-    questions.some((q) => q.state !== 'sent') ||
+    questions.some((q) => q.state === 'open' || q.state === 'answered') ||
     work.some((w) => w.kind !== 'close_batch' && (w.state === 'queued' || w.state === 'in_progress'));
   if (open) return 'open';
   return comments.some((c) => PENDING_STATES.has(c.state)) ? 'closable' : 'none';
