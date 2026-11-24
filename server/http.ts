@@ -2,59 +2,35 @@ import { existsSync, readFileSync, statSync } from 'node:fs';
 import { type IncomingMessage, type ServerResponse, createServer } from 'node:http';
 import { extname, join, normalize } from 'node:path';
 import { getSessionMessages } from '@anthropic-ai/claude-agent-sdk';
-import {
-  type ReviewInput,
-  type SubmitInput,
-  addInstruction,
-  enqueueReReview,
-  recheckAfterPush,
-  submitDecisions,
-  submitReview,
-} from './actions.ts';
-import { batchStatus, buildGreen, runnable } from './batch.ts';
 import { config } from './config.ts';
-import { type Db, type Pr, now } from './db.ts';
-import { commentExcerpt, excerpt } from './excerpt.ts';
-import { type ReviewThread, findingUrl } from './github.ts';
+import type { Db } from './db.ts';
+import { commentExcerpt } from './excerpt.ts';
+import type { Group, Pr, PrDetail, PrSummary } from './model.ts';
 import type { Poller } from './poller.ts';
+import { resetSession, setPaused, submitAnswers, unblock } from './prs.ts';
+import { cleanupPr, instruct, roleOf } from './roles/index.ts';
+import type { Route } from './roles/role.ts';
 import type { Runner } from './runner.ts';
-import { deniedCalls, describeNixOnly, describeSettings, isExcluded, resetOverride, saveOverrides, setting } from './settings.ts';
-import { bus, changed, clearNotification, errorMessage } from './util.ts';
+import { deniedCalls, describeNixOnly, describeSettings, isExcluded, resetOverride, saveOverrides } from './settings.ts';
+import { bus, errorMessage } from './util.ts';
 
-type Group = 'ready' | 'needs_me' | 'working' | 'queued' | 'push' | 'out_of_date' | 'waiting' | 'ignored' | 'closed';
-
-function groupOf(db: Db, pr: Pr): Group {
+/** Where the dashboard lists a PR. The states every PR has come first; the rest is up to its role. */
+export function groupOf(db: Db, pr: Pr): Group {
   // A blocked PR waits for me to resolve it by hand; the list marks it with a Blocked tag.
   if (pr.state !== 'open') return pr.blocked ? 'needs_me' : 'closed';
   if (pr.ignored) return 'ignored';
   if (pr.blocked) return 'needs_me';
   if (pr.agent_running) return 'working';
-  // A self-review that did not pass holds the push until I repeat it, fix the cause or push anyway.
-  if (setting('autonomy') && pr.self_review_state === 'failed') return 'needs_me';
-  const comments = db.comments(pr.id);
-  const questions = db.questions(pr.id);
-  if (comments.some((c) => c.state === 'proposal') || questions.some((q) => q.state === 'open') || pr.review_state === 'draft')
-    return 'needs_me';
-  const work = db.workItems(pr.id);
-  if (work.some((w) => w.state === 'queued' && runnable(pr, w.kind))) return 'queued';
-  const batch = pr.role === 'own' ? batchStatus(comments, questions, work) : 'none';
-  // Fixes waiting out the quiet time or being pushed right now: the push is up next, not someone else.
-  if (batch === 'closable') return 'push';
-  if (pr.ready && batch === 'none') return 'ready';
-  if (pr.review_out_of_date) return 'out_of_date';
-  return 'waiting';
+  const role = roleOf(pr);
+  if (role.needsMe(db, pr) || db.questions(pr.id).some((q) => q.state === 'open')) return 'needs_me';
+  if (db.workItems(pr.id).some((w) => w.state === 'queued' && role.runnable(pr, w.kind))) return 'queued';
+  return role.idleGroup(db, pr);
 }
 
-/** The threads of the review draft, each with its code excerpt. */
-function reviewThreads(pr: Pr) {
-  const threads = JSON.parse(pr.review_threads ?? '[]') as ReviewThread[];
-  return threads.map(({ diff_hunk, ...t }) => ({ ...t, excerpt: commentExcerpt(pr.worktree, { ...t, diff_hunk }) }));
-}
-
-function summary(db: Db, pr: Pr, running: boolean) {
+function summary(db: Db, pr: Pr, running: boolean): PrSummary {
   const comments = db.comments(pr.id);
   // The threads are part of the PR page only; the list does not carry them.
-  const { review_threads: _threads, ...fields } = pr;
+  const { review_threads: _threads, ...fields } = pr as Pr & { review_threads?: unknown };
   return {
     ...fields,
     group: groupOf(db, pr),
@@ -66,9 +42,8 @@ function summary(db: Db, pr: Pr, running: boolean) {
       pending: comments.filter((c) => c.state === 'fixed' || c.state === 'skipped').length,
       findings: db.findings(pr.id).filter((f) => f.state === 'draft').length,
     },
-    waitingForBuild: pr.role === 'review' && pr.review_state !== 'submitted' && !pr.is_draft && !buildGreen(pr),
-    batch: pr.role === 'own' ? batchStatus(comments, db.questions(pr.id), db.workItems(pr.id)) : 'none',
-  };
+    ...roleOf(pr).summary(db, pr),
+  } as PrSummary;
 }
 
 const MIME: Record<string, string> = {
@@ -106,97 +81,32 @@ function serveStatic(res: ServerResponse, urlPath: string) {
 }
 
 export function createHttp({ db, poller, runner }: { db: Db; poller: Poller; runner: Runner }) {
-  type Handler = (req: IncomingMessage, res: ServerResponse, pr: Pr) => Promise<unknown>;
-
-  const prRoutes: Record<string, Handler> = {
-    'GET ': async (_q, _r, pr) => ({
+  /** What every PR offers; a role adds its own actions and may replace one of these (`Role.routes`). */
+  const common: Record<string, Route> = {
+    'GET ': ({ pr }): PrDetail => ({
       pr: summary(db, pr, runner.isRunning(pr.id)),
       comments: db.comments(pr.id).map((c) => ({ ...c, excerpt: commentExcerpt(pr.worktree, c) })),
       questions: db.questions(pr.id),
-      findings: db.findings(pr.id).map((f) => ({ ...f, url: findingUrl(pr, f), excerpt: excerpt(pr.worktree, f.path, f.line) })),
-      threads: reviewThreads(pr),
+      ...roleOf(pr).detail(db, pr),
       work: db.workItems(pr.id).slice(-30),
     }),
-    'GET transcript': async (_q, _r, pr) => {
-      if (!pr.session_id) return [];
-      return getSessionMessages(pr.session_id, pr.worktree ? { dir: pr.worktree } : undefined);
+    'GET transcript': ({ pr }) => (pr.session_id ? getSessionMessages(pr.session_id, pr.worktree ? { dir: pr.worktree } : undefined) : []),
+    'POST submit': ({ pr, body }) => void submitAnswers(db, pr, (body as { answers?: { id: number; answer: string }[] }).answers),
+    'POST instruction': ({ pr, body }) => {
+      const text = (body as { text?: string }).text?.trim();
+      if (!text) throw new Error('Empty instruction.');
+      instruct(db, pr, text);
     },
-    'POST submit': async (req, _r, pr) => {
-      submitDecisions(db, pr, await readJson<SubmitInput>(req));
-      runner.wake();
+    'POST pause': ({ pr }) => setPaused(db, pr, true),
+    'POST resume': ({ pr }) => setPaused(db, pr, false),
+    'POST unblock': async ({ pr }) => {
+      unblock(db, pr);
+      if (pr.state === 'merged' || pr.state === 'dropped') await cleanupPr(db, db.pr(pr.id)!);
     },
-    'POST instruction': async (req, _r, pr) => {
-      const { text } = await readJson<{ text: string }>(req);
-      if (!text?.trim()) throw new Error('Empty instruction.');
-      addInstruction(db, pr, text.trim());
-      runner.wake();
-    },
-    'POST review': async (req, _r, pr) => {
-      await submitReview(db, pr, await readJson<ReviewInput>(req));
-    },
-    'POST followup-review': async (_q, _r, pr) => {
-      if (pr.role === 'review') enqueueReReview(db, pr);
-      else if (!recheckAfterPush(db, pr)) throw new Error('No open proposal or question to check again.');
-      runner.wake();
-    },
-    'POST pause': async (_q, _r, pr) => {
-      db.update('prs', pr.id, { paused: 1 });
-      changed(pr.id);
-    },
-    'POST resume': async (_q, _r, pr) => {
-      db.update('prs', pr.id, { paused: 0 });
-      changed(pr.id);
-      runner.wake();
-    },
-    // Ends the veto window, and lets a batch through whose self-review did not pass.
-    'POST push-now': async (_q, _r, pr) => {
-      if (pr.self_review_state !== 'failed' && !pr.push_after) throw new Error('Nothing waits for my go-ahead.');
-      db.update('prs', pr.id, { self_review_state: 'passed', push_after: now() });
-      clearNotification(`self-review:${pr.id}`);
-      changed(pr.id);
-      poller.checkBatches();
-    },
-    'POST retry-review': async (_q, _r, pr) => {
-      if (pr.self_review_state !== 'failed') throw new Error('There is no failed self-review to repeat.');
-      db.update('prs', pr.id, { self_review_state: null, self_review_result: null, self_review_round: 0 });
-      clearNotification(`self-review:${pr.id}`);
-      changed(pr.id);
-      poller.checkBatches();
-    },
-    'POST unblock': async (_q, _r, pr) => {
-      db.update('prs', pr.id, { blocked: null });
-      clearNotification(`blocked:${pr.id}`);
-      clearNotification(`cleanup:${pr.id}`);
-      if (pr.state === 'merged' || pr.state === 'dropped') await poller.cleanup(db.pr(pr.id)!);
-      // Failed work is retried after a manual unblock.
-      db.run(
-        `UPDATE work_items SET state = 'queued', error = NULL WHERE pr_id = ? AND state = 'failed' AND id = (SELECT MAX(id) FROM work_items WHERE pr_id = ?)`,
-        pr.id,
-        pr.id,
-      );
-      changed(pr.id);
-      runner.wake();
-    },
-    'POST ignore': async (_q, _r, pr) => {
-      if (pr.role !== 'review') throw new Error('Only reviews can be ignored.');
-      db.update('prs', pr.id, { ignored: 1 });
-      changed(pr.id);
-      await poller.discard(db.pr(pr.id)!);
-    },
-    'POST unignore': async (_q, _r, pr) => {
-      db.update('prs', pr.id, { ignored: 0 });
-      changed(pr.id);
-      await poller.pollNow();
-      runner.wake();
-    },
-    'POST reset-session': async (_q, _r, pr) => {
-      if (pr.agent_running) throw new Error('The agent is running.');
-      db.update('prs', pr.id, { session_id: null });
-      changed(pr.id);
-    },
-    'POST remove-worktree': async (_q, _r, pr) => {
+    'POST reset-session': ({ pr }) => resetSession(db, pr),
+    'POST remove-worktree': ({ pr }) => {
       if (pr.state === 'open') throw new Error('Only closed PRs can be removed manually.');
-      await poller.cleanup(pr);
+      return cleanupPr(db, pr);
     },
   };
 
@@ -245,8 +155,7 @@ export function createHttp({ db, poller, runner }: { db: Db; poller: Poller; run
         const { worktree, paused } = await readJson<{ worktree: string; paused: boolean }>(req);
         const pr = db.prs().find((p) => p.worktree && (worktree === p.worktree || worktree.startsWith(`${p.worktree}/`)));
         if (!pr) return send(res, 404, { error: `No PR owns ${worktree}.` });
-        db.update('prs', pr.id, { paused: paused ? 1 : 0 });
-        changed(pr.id);
+        setPaused(db, pr, paused);
         if (!paused) runner.wake();
         return send(res, 200, { pr: `${pr.repo}#${pr.number}`, paused });
       }
@@ -254,9 +163,14 @@ export function createHttp({ db, poller, runner }: { db: Db; poller: Poller; run
       if (m) {
         const pr = db.pr(Number(m[1]));
         if (!pr) return send(res, 404, { error: 'Unknown PR.' });
-        const handler = prRoutes[`${req.method} ${m[2] ?? ''}`];
+        const key = `${req.method} ${m[2] ?? ''}`;
+        const handler = roleOf(pr).routes[key] ?? common[key];
         if (!handler) return send(res, 404, { error: 'Unknown route.' });
-        return send(res, 200, (await handler(req, res, pr)) ?? { ok: true });
+        const body = req.method === 'POST' ? await readJson<unknown>(req) : undefined;
+        const result = await handler({ db, pr, body, pollNow: () => poller.pollNow() });
+        // Any action may have left work for the agent.
+        if (req.method === 'POST') runner.wake();
+        return send(res, 200, result ?? { ok: true });
       }
       if (path.startsWith('/api/')) return send(res, 404, { error: 'Unknown route.' });
       serveStatic(res, path);

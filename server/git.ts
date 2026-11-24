@@ -1,7 +1,7 @@
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { config } from './config.ts';
-import type { Pr } from './db.ts';
+import type { PrBase } from './model.ts';
 import { token } from './github.ts';
 import { run } from './util.ts';
 
@@ -87,14 +87,14 @@ function ensureClone(repo: string): Promise<string> {
 }
 
 /** The ref that holds the PR head after `fetchHead`. Fork heads come from the pull ref. */
-const remoteHeadRef = (pr: Pr) => (pr.is_cross_repo ? `refs/remotes/origin/pr/${pr.number}` : `refs/remotes/origin/${pr.head_ref}`);
+const remoteHeadRef = (pr: PrBase) => (pr.is_cross_repo ? `refs/remotes/origin/pr/${pr.number}` : `refs/remotes/origin/${pr.head_ref}`);
 
-async function fetchHead(cwd: string, pr: Pr) {
+async function fetchHead(cwd: string, pr: PrBase) {
   const src = pr.is_cross_repo ? `refs/pull/${pr.number}/head` : `refs/heads/${pr.head_ref}`;
   await gitNet(pr.repo, cwd, ['fetch', '--no-tags', httpsUrl(pr.repo), `+${src}:${remoteHeadRef(pr)}`]);
 }
 
-export async function fetchBase(cwd: string, pr: Pr) {
+export async function fetchBase(cwd: string, pr: PrBase) {
   await gitNet(pr.repo, cwd, ['fetch', '--no-tags', httpsUrl(pr.repo), `+refs/heads/${pr.base_ref}:refs/remotes/origin/${pr.base_ref}`]);
 }
 
@@ -117,7 +117,7 @@ async function listWorktrees(clone: string): Promise<WorktreeEntry[]> {
 }
 
 /** Finds or creates the worktree for the PR's head branch and fetches its head. */
-export async function ensureWorktree(pr: Pr): Promise<string> {
+export async function ensureWorktree(pr: PrBase): Promise<string> {
   const clone = await ensureClone(pr.repo);
   await fetchHead(clone, pr);
   const branch = pr.head_ref;
@@ -145,19 +145,20 @@ export async function isDirty(path: string): Promise<boolean> {
 const isAncestor = (cwd: string, a: string, b: string) => gitOk(cwd, ['merge-base', '--is-ancestor', a, b]);
 
 /**
- * Brings the worktree to the PR head before a session runs. With an open batch the local
- * branch may hold amended commits that the batch will push.
+ * Brings the worktree to the PR head before a session runs. A worktree that holds no work of mine
+ * (`mine` false) just follows the head. One that does keeps its commits: with an open batch, started at
+ * `batchStart`, the local branch may hold amended commits that the batch will push.
  *
  * If the branch was pushed to while the batch was open, the batch continues from the new head as
  * long as no agent work would be lost, and the new head is returned for the caller to record. Agent
  * commits that are not on top of the new head raise `Diverged`; uncommitted agent changes block the PR.
  */
-export async function sync(pr: Pr, path: string): Promise<string | undefined> {
+export async function sync(pr: PrBase, path: string, work: { mine: boolean; batchStart?: string | null }): Promise<string | undefined> {
   await fetchHead(path, pr);
   const head = await git(path, ['rev-parse', 'HEAD']);
   const remote = await git(path, ['rev-parse', remoteHeadRef(pr)]);
-  if (pr.role === 'own' && pr.batch_head_sha) {
-    const start = pr.batch_head_sha;
+  if (work.mine && work.batchStart) {
+    const start = work.batchStart;
     if (remote === start) {
       if (head !== remote && (await isAncestor(path, head, remote))) await git(path, ['merge', '--ff-only', remoteHeadRef(pr)]);
       return undefined;
@@ -184,8 +185,8 @@ export async function sync(pr: Pr, path: string): Promise<string | undefined> {
     );
   }
   if (head === remote) return;
-  // A PR I review holds no work of mine: after a force push, just check out the new head.
-  if (pr.role === 'review') {
+  // Nothing of mine to lose: after a force push, just check out the new head.
+  if (!work.mine) {
     await git(path, ['reset', '--hard', remoteHeadRef(pr)]);
     return undefined;
   }
@@ -197,18 +198,18 @@ export async function sync(pr: Pr, path: string): Promise<string | undefined> {
 }
 
 /** Rebases onto the freshly fetched base. Returns false (and aborts) on conflicts. */
-export async function rebaseOntoBase(pr: Pr, path: string): Promise<boolean> {
+export async function rebaseOntoBase(pr: PrBase, path: string): Promise<boolean> {
   await fetchBase(path, pr);
   if (await gitOk(path, ['rebase', `refs/remotes/origin/${pr.base_ref}`])) return true;
   await gitOk(path, ['rebase', '--abort']);
   return false;
 }
 
-export async function localChanged(pr: Pr, path: string): Promise<boolean> {
+export async function localChanged(pr: PrBase, path: string): Promise<boolean> {
   return (await git(path, ['rev-parse', 'HEAD'])) !== (await git(path, ['rev-parse', remoteHeadRef(pr)]));
 }
 
-export async function push(pr: Pr, path: string, expectedSha: string): Promise<string> {
+export async function push(pr: PrBase, path: string, expectedSha: string): Promise<string> {
   await gitNet(pr.repo, path, [
     'push',
     `--force-with-lease=refs/heads/${pr.head_ref}:${expectedSha}`,
@@ -250,14 +251,17 @@ export function interactiveSessionsIn(path: string, ownSessionIds: Set<string>):
   return out;
 }
 
-/** Removes a worktree after merge, unless it holds anything that would be lost: `Blocked`, or `Unpushed` for commits. */
-export async function removeWorktree(pr: Pr, ownSessionIds: Set<string>) {
+/**
+ * Removes a worktree after merge, unless it holds anything that would be lost: `Blocked`, or `Unpushed` for
+ * commits when the worktree holds work of mine (`mine`).
+ */
+export async function removeWorktree(pr: PrBase, ownSessionIds: Set<string>, mine: boolean) {
   const path = pr.worktree;
   if (!path || !existsSync(path)) return;
   if (await isDirty(path)) throw new Blocked(`Worktree ${path} has uncommitted changes.`);
   const clone = clonePath(pr.repo);
-  // A review worktree holds no work of mine; commits missing upstream are the author's, from before a force push.
-  if (pr.role === 'own') {
+  // Without work of mine, commits missing upstream are the author's, from before a force push.
+  if (mine) {
     if (!(await gitOk(clone, ['cat-file', '-e', `${pr.head_sha}^{commit}`]))) {
       await gitNet(pr.repo, clone, [
         'fetch',

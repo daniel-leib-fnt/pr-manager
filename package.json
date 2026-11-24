@@ -11,6 +11,7 @@
     "start": "node --disable-warning=ExperimentalWarning server/main.ts",
     "check": "tsc --noEmit",
     "test": "node --disable-warning=ExperimentalWarning --test 'test/**/*.test.ts'",
+    "test:coverage": "node --disable-warning=ExperimentalWarning --experimental-test-coverage --test 'test/**/*.test.ts'",
     "format": "prettier --write .",
     "format:check": "prettier --check ."
   },

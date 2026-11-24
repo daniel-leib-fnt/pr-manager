@@ -1,13 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { isAbsolute, relative, resolve } from 'node:path';
-
-/** A few lines of a file around the line a comment or finding points to. */
-export interface Excerpt {
-  /** Number of the first line in `text`, 1-based. */
-  start: number;
-  line: number;
-  text: string;
-}
+import type { Excerpt } from './model.ts';
 
 /** The lines around `line` (1-based), or null when the file has no such line. */
 export function cut(content: string, line: number, around = 3): Excerpt | null {

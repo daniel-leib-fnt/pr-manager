@@ -1,163 +1,42 @@
-import { mkdirSync } from 'node:fs';
-import { join } from 'node:path';
+import { existsSync, mkdirSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import { DatabaseSync, type SQLInputValue } from 'node:sqlite';
 import { config } from './config.ts';
+import type { Comment, Finding, OwnFields, Pr, PrBase, PrFields, Question, ReviewFields, WorkItem, WorkKind } from './model.ts';
 
-type Role = 'own' | 'review';
-export type PrState = 'open' | 'merged' | 'closed' | 'dropped';
-type ReviewState = 'none' | 'draft' | 'submitted';
+const OWN_COLUMNS = [
+  'batch_head_sha',
+  'last_event_at',
+  'ci_attempts',
+  'ready',
+  'self_review_sha',
+  'self_review_state',
+  'self_review_result',
+  'self_review_round',
+  'push_after',
+] as const satisfies readonly (keyof OwnFields)[];
 
-export interface Pr {
-  id: number;
-  url: string;
-  repo: string;
-  number: number;
-  title: string;
-  author: string;
-  role: Role;
-  head_ref: string;
-  head_sha: string;
-  base_ref: string;
-  is_cross_repo: number;
-  is_draft: number;
-  state: PrState;
-  gh_updated_at: string;
-  check_state: string | null;
-  summary: string | null;
-  worktree: string | null;
-  session_id: string | null;
-  paused: number;
-  blocked: string | null;
-  agent_running: number;
-  dirty_by_agent: number;
-  interrupted: number;
-  batch_head_sha: string | null;
-  last_event_at: string | null;
-  ci_attempts: number;
-  in_review_search: number;
-  review_state: ReviewState;
-  review_verdict: string | null;
-  review_body: string | null;
-  review_draft_sha: string | null;
-  reviewed_sha: string | null;
-  reviewed_at: string | null;
-  review_out_of_date: number;
-  /** JSON `ReviewThread[]`: the threads my review draft is about, as they were when the agent last wrote to it. */
-  review_threads: string | null;
-  ignored: number;
-  /** 1 while GitHub reports one of my PRs as approved and mergeable. */
-  ready: number;
-  /** Why the worktree of a merged PR was kept instead of removed; null otherwise. */
-  kept: string | null;
-  /** The worktree HEAD the self-review of the open batch ran on, or is about to run on. */
-  self_review_sha: string | null;
-  /** null: no review yet, or one is queued; passed: the batch may be pushed; failed: the push waits for me. */
-  self_review_state: 'passed' | 'failed' | null;
-  /** JSON SelfReviewResult of the last review of the open batch. */
-  self_review_result: string | null;
-  /** Correction rounds the self-review sent back to the agent in the open batch. */
-  self_review_round: number;
-  /** End of the veto window: a reviewed batch the agent decided alone is pushed only after this time. */
-  push_after: string | null;
-  created_at: string;
-}
+const REVIEW_COLUMNS = [
+  'in_review_search',
+  'review_state',
+  'review_verdict',
+  'review_body',
+  'review_draft_sha',
+  'reviewed_sha',
+  'reviewed_at',
+  'review_out_of_date',
+  'review_threads',
+] as const satisfies readonly (keyof ReviewFields)[];
 
-// self_review: findings of the self-review on the open batch, handed back to the agent as an accepted item.
-type CommentKind = 'thread' | 'issue_comment' | 'review_body' | 'ci' | 'instruction' | 'conflict' | 'self_review';
-// new: not triaged yet; fixed: changed locally (or a reply that keeps the thread open), waiting for push;
-// proposal: waiting for a decision, possibly pre-decided by the agent; accepted: decided, agent has to implement
-// or write the reply (see `decision`);
-// skipped: I skipped (no reason) or rejected (reason = reply), waiting for push; done: finished; gone: deleted on GitHub.
-type CommentState = 'new' | 'fixed' | 'proposal' | 'accepted' | 'skipped' | 'done' | 'gone';
+/** The table that holds the fields of each role, one row per PR of that role. */
+const ROLE_TABLES = { own: { table: 'own_prs', columns: OWN_COLUMNS }, review: { table: 'review_prs', columns: REVIEW_COLUMNS } } as const;
 
-export interface Comment {
-  id: number;
-  pr_id: number;
-  kind: CommentKind;
-  gh_key: string;
-  thread_id: string | null;
-  reply_to_db_id: number | null;
-  last_seen_gh_id: string | null;
-  author: string | null;
-  body: string;
-  path: string | null;
-  line: number | null;
-  /** 1 when the commented line no longer exists at the PR head; `line` is then the line at the commented commit. */
-  outdated: number;
-  /** GitHub's diff hunk ending at the commented line, for the code excerpt when the worktree cannot provide it. */
-  diff_hunk: string | null;
-  url: string | null;
-  state: CommentState;
-  proposal: string | null;
-  reply_draft: string | null;
-  /** 1 when I wrote the reply myself; any other reply carries the reply header. */
-  reply_edited: number;
-  skip_reason: string | null;
-  /**
-   * Accept implements the proposal; reject and reply change no code, the agent only writes the reply; skip posts
-   * nothing. On a proposal it is the agent's pre-decision (null: the agent leaves it to me); after the submit, mine.
-   */
-  decision: 'accept' | 'reject' | 'reply' | 'skip' | null;
-  auto: number;
-  /** With autonomy: risk class, confidence and reason the agent gave for a proposal that changes code. */
-  risk: 'local' | 'contained' | 'structural' | null;
-  confidence: 'high' | 'medium' | 'low' | null;
-  reason: string | null;
-  /** 1 when the standing decision is the agent's pre-decision, taken without me submitting the batch. */
-  by_agent: number;
-  note: string | null;
-  /** Text of the checklist line this item stands for; null for a whole comment. */
-  task: string | null;
-  /** JSON TaskSource of the comment holding the checklist line. */
-  task_source: string | null;
-  /** 1 when the reply asks the reviewer to clarify: no box is checked and the thread stays unresolved. */
-  clarify: number;
-  created_at: string;
-  updated_at: string;
-}
-
-export interface Question {
-  id: number;
-  pr_id: number;
-  comment_id: number | null;
-  question: string;
-  options: string | null;
-  /** My answer; on a withdrawn question, the agent's reason. */
-  answer: string | null;
-  // open: waits for my answer; answered: the next run takes the answer to the agent; sent: the agent has it;
-  // withdrawn: the agent took it back because a push settled it.
-  state: 'open' | 'answered' | 'sent' | 'withdrawn';
-  created_at: string;
-}
-
-export interface Finding {
-  id: number;
-  pr_id: number;
-  kind: 'finding' | 'thread_reply';
-  path: string | null;
-  line: number | null;
-  thread_id: string | null;
-  reply_to_db_id: number | null;
-  in_diff: number;
-  /** 1 on a thread reply that says the new head settles my point: the thread is resolved when I submit the review. */
-  resolve: number;
-  body: string;
-  state: 'draft' | 'skipped' | 'submitted';
-  created_at: string;
-}
-
-export type WorkKind = 'summarize' | 'comments' | 'answers' | 'review' | 'followup_review' | 'self_review' | 'close_batch';
-
-export interface WorkItem {
-  id: number;
-  pr_id: number;
-  kind: WorkKind;
-  payload: string | null;
-  state: 'queued' | 'in_progress' | 'done' | 'failed';
-  error: string | null;
-  created_at: string;
-  started_at: string | null;
-  finished_at: string | null;
+/** The tables `update` and `insert` write, with their rows. PRs go through `insertPr` and `updatePr`. */
+interface Rows {
+  comments: Comment;
+  questions: Question;
+  findings: Finding;
+  work_items: WorkItem;
 }
 
 const schema = `
@@ -185,9 +64,24 @@ CREATE TABLE IF NOT EXISTS prs (
   agent_running INTEGER NOT NULL DEFAULT 0,
   dirty_by_agent INTEGER NOT NULL DEFAULT 0,
   interrupted INTEGER NOT NULL DEFAULT 0,
+  ignored INTEGER NOT NULL DEFAULT 0,
+  kept TEXT,
+  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+);
+CREATE TABLE IF NOT EXISTS own_prs (
+  pr_id INTEGER PRIMARY KEY REFERENCES prs(id) ON DELETE CASCADE,
   batch_head_sha TEXT,
   last_event_at TEXT,
   ci_attempts INTEGER NOT NULL DEFAULT 0,
+  ready INTEGER NOT NULL DEFAULT 0,
+  self_review_sha TEXT,
+  self_review_state TEXT,
+  self_review_result TEXT,
+  self_review_round INTEGER NOT NULL DEFAULT 0,
+  push_after TEXT
+);
+CREATE TABLE IF NOT EXISTS review_prs (
+  pr_id INTEGER PRIMARY KEY REFERENCES prs(id) ON DELETE CASCADE,
   in_review_search INTEGER NOT NULL DEFAULT 0,
   review_state TEXT NOT NULL DEFAULT 'none',
   review_verdict TEXT,
@@ -196,16 +90,7 @@ CREATE TABLE IF NOT EXISTS prs (
   reviewed_sha TEXT,
   reviewed_at TEXT,
   review_out_of_date INTEGER NOT NULL DEFAULT 0,
-  review_threads TEXT,
-  ignored INTEGER NOT NULL DEFAULT 0,
-  ready INTEGER NOT NULL DEFAULT 0,
-  kept TEXT,
-  self_review_sha TEXT,
-  self_review_state TEXT,
-  self_review_result TEXT,
-  self_review_round INTEGER NOT NULL DEFAULT 0,
-  push_after TEXT,
-  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+  review_threads TEXT
 );
 CREATE TABLE IF NOT EXISTS comments (
   id INTEGER PRIMARY KEY,
@@ -284,54 +169,142 @@ CREATE TABLE IF NOT EXISTS kv (
 
 export type Db = ReturnType<typeof openDb>;
 
+/** Columns added after the first release; CREATE TABLE IF NOT EXISTS does not add them. */
+const ADDED_COLUMNS: [string, string, string][] = [
+  ['comments', 'decision', 'TEXT'],
+  ['comments', 'outdated', 'INTEGER NOT NULL DEFAULT 0'],
+  ['comments', 'diff_hunk', 'TEXT'],
+  ['findings', 'resolve', 'INTEGER NOT NULL DEFAULT 0'],
+  ['comments', 'risk', 'TEXT'],
+  ['comments', 'confidence', 'TEXT'],
+  ['comments', 'reason', 'TEXT'],
+  ['comments', 'by_agent', 'INTEGER NOT NULL DEFAULT 0'],
+  ['prs', 'kept', 'TEXT'],
+];
+
+/** Role columns that `prs` gained before the role tables existed; a database older than them gets them first. */
+const LEGACY_PR_COLUMNS: [string, string, string][] = [
+  ['prs', 'review_threads', 'TEXT'],
+  ['prs', 'self_review_sha', 'TEXT'],
+  ['prs', 'self_review_state', 'TEXT'],
+  ['prs', 'self_review_result', 'TEXT'],
+  ['prs', 'self_review_round', 'INTEGER NOT NULL DEFAULT 0'],
+  ['prs', 'push_after', 'TEXT'],
+];
+
+function migrate(db: DatabaseSync, path: string) {
+  const columns = (table: string) => (db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[]).map((c) => c.name);
+  const add = (list: [string, string, string][]) => {
+    for (const [table, column, type] of list) {
+      if (columns(table).includes(column)) continue;
+      db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`);
+      // Existing thread rows get their hunk on the next ingest, which a reset update time forces.
+      if (column === 'diff_hunk') db.exec(`UPDATE prs SET gh_updated_at = '' WHERE role = 'own' AND state = 'open'`);
+    }
+  };
+  add(ADDED_COLUMNS);
+
+  // Until the role tables existed, `prs` held the fields of both roles: move them, then drop them from `prs`.
+  if (columns('prs').includes('review_state')) {
+    const backup = `${path}.before-role-tables`;
+    if (path !== ':memory:' && !existsSync(backup)) db.exec(`VACUUM INTO '${backup.replaceAll("'", "''")}'`);
+    add(LEGACY_PR_COLUMNS);
+    db.exec('BEGIN');
+    try {
+      for (const [role, { table, columns: cols }] of Object.entries(ROLE_TABLES)) {
+        db.exec(`INSERT INTO ${table} (pr_id, ${cols.join(', ')}) SELECT id, ${cols.join(', ')} FROM prs WHERE role = '${role}'`);
+        for (const c of cols) db.exec(`ALTER TABLE prs DROP COLUMN ${c}`);
+      }
+      db.exec('COMMIT');
+    } catch (e) {
+      db.exec('ROLLBACK');
+      throw e;
+    }
+  }
+
+  // Recreated on every start, so the view always shows the columns the tables have now.
+  db.exec(`
+    DROP VIEW IF EXISTS pr_view;
+    CREATE VIEW pr_view AS
+      SELECT p.*, ${OWN_COLUMNS.map((c) => `o.${c}`).join(', ')}, ${REVIEW_COLUMNS.map((c) => `r.${c}`).join(', ')}
+      FROM prs p LEFT JOIN own_prs o ON o.pr_id = p.id LEFT JOIN review_prs r ON r.pr_id = p.id`);
+}
+
 export function openDb(path = join(config.stateDir, 'pr-manager.db')) {
-  if (path !== ':memory:') mkdirSync(config.stateDir, { recursive: true });
+  if (path !== ':memory:') mkdirSync(dirname(path), { recursive: true });
   const db = new DatabaseSync(path);
   db.exec('PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;');
   db.exec(schema);
-  // Columns added after the first release; CREATE TABLE IF NOT EXISTS does not add them.
-  const migrations: [string, string, string][] = [
-    ['comments', 'decision', 'TEXT'],
-    ['comments', 'outdated', 'INTEGER NOT NULL DEFAULT 0'],
-    ['comments', 'diff_hunk', 'TEXT'],
-    ['findings', 'resolve', 'INTEGER NOT NULL DEFAULT 0'],
-    ['prs', 'review_threads', 'TEXT'],
-    ['comments', 'risk', 'TEXT'],
-    ['comments', 'confidence', 'TEXT'],
-    ['comments', 'reason', 'TEXT'],
-    ['comments', 'by_agent', 'INTEGER NOT NULL DEFAULT 0'],
-    ['prs', 'kept', 'TEXT'],
-    ['prs', 'self_review_sha', 'TEXT'],
-    ['prs', 'self_review_state', 'TEXT'],
-    ['prs', 'self_review_result', 'TEXT'],
-    ['prs', 'self_review_round', 'INTEGER NOT NULL DEFAULT 0'],
-    ['prs', 'push_after', 'TEXT'],
-  ];
-  for (const [table, column, type] of migrations) {
-    const cols = db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[];
-    if (cols.some((c) => c.name === column)) continue;
-    db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`);
-    // Existing thread rows get their hunk on the next ingest, which a reset update time forces.
-    if (column === 'diff_hunk') db.exec(`UPDATE prs SET gh_updated_at = '' WHERE role = 'own' AND state = 'open'`);
-  }
+  migrate(db, path);
 
   const all = <T>(sql: string, ...params: SQLInputValue[]) => db.prepare(sql).all(...params) as unknown as T[];
   const get = <T>(sql: string, ...params: SQLInputValue[]) => db.prepare(sql).get(...params) as unknown as T | undefined;
   const run = (sql: string, ...params: SQLInputValue[]) => db.prepare(sql).run(...params);
 
-  // Updates the given columns of one row; keys are trusted column names from our own code.
-  const update = (table: string, id: number, fields: Record<string, SQLInputValue>) => {
-    const keys = Object.keys(fields);
-    if (keys.length === 0) return;
-    const extra = table === 'comments' ? `, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')` : '';
-    run(`UPDATE ${table} SET ${keys.map((k) => `${k} = ?`).join(', ')}${extra} WHERE id = ?`, ...keys.map((k) => fields[k]), id);
+  type Fields = Record<string, SQLInputValue | undefined>;
+  // Table and column names are trusted: they come from our own code, never from input.
+  const set = (table: string, key: string, id: number, fields: Fields, extra = '') => {
+    const keys = Object.keys(fields).filter((k) => fields[k] !== undefined);
+    if (keys.length === 0) return 1;
+    const res = run(
+      `UPDATE ${table} SET ${keys.map((k) => `${k} = ?`).join(', ')}${extra} WHERE ${key} = ?`,
+      ...keys.map((k) => fields[k]!),
+      id,
+    );
+    return Number(res.changes);
   };
-
-  const insert = (table: string, fields: Record<string, SQLInputValue>) => {
-    const keys = Object.keys(fields);
-    const res = run(`INSERT INTO ${table} (${keys.join(', ')}) VALUES (${keys.map(() => '?').join(', ')})`, ...keys.map((k) => fields[k]));
+  const add = (table: string, fields: Fields) => {
+    const keys = Object.keys(fields).filter((k) => fields[k] !== undefined);
+    const res = run(`INSERT INTO ${table} (${keys.join(', ')}) VALUES (${keys.map(() => '?').join(', ')})`, ...keys.map((k) => fields[k]!));
     return Number(res.lastInsertRowid);
   };
+  const pick = (fields: Fields, columns: readonly string[]) =>
+    Object.fromEntries(Object.entries(fields).filter(([k]) => columns.includes(k)));
+  const roleColumns: readonly string[] = [...OWN_COLUMNS, ...REVIEW_COLUMNS];
+  const baseOf = (fields: Fields) => Object.fromEntries(Object.entries(fields).filter(([k]) => !roleColumns.includes(k)));
+
+  /** Updates the given columns of one row. */
+  const update = <T extends keyof Rows>(table: T, id: number, fields: Partial<Rows[T]>) => {
+    set(table, 'id', id, fields as Fields, table === 'comments' ? `, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')` : '');
+  };
+
+  const insert = <T extends keyof Rows>(table: T, fields: Partial<Rows[T]>) => add(table, fields as Fields);
+
+  /**
+   * Updates a PR, each column in the table that holds it. A column of the other role is a bug in the caller
+   * and throws, instead of being dropped silently.
+   */
+  const updatePr = (id: number, fields: Partial<PrFields>) => {
+    set('prs', 'id', id, baseOf(fields));
+    for (const [role, { table, columns }] of Object.entries(ROLE_TABLES)) {
+      const part = pick(fields, columns);
+      if (!set(table, 'pr_id', id, part)) throw new Error(`PR ${id} is not of role ${role}: cannot set ${Object.keys(part).join(', ')}.`);
+    }
+  };
+
+  /** Inserts a PR together with the row of its role. */
+  const insertPr = (
+    fields: Pick<PrBase, 'url' | 'repo' | 'number' | 'title' | 'author' | 'role' | 'head_ref' | 'head_sha' | 'base_ref'> &
+      Partial<PrFields>,
+  ) =>
+    transaction(() => {
+      const id = add('prs', baseOf(fields));
+      const { table, columns } = ROLE_TABLES[fields.role];
+      add(table, { pr_id: id, ...pick(fields, columns) });
+      return id;
+    });
+
+  function transaction<T>(fn: () => T): T {
+    db.exec('BEGIN');
+    try {
+      const res = fn();
+      db.exec('COMMIT');
+      return res;
+    } catch (e) {
+      db.exec('ROLLBACK');
+      throw e;
+    }
+  }
 
   return {
     all,
@@ -339,9 +312,13 @@ export function openDb(path = join(config.stateDir, 'pr-manager.db')) {
     run,
     update,
     insert,
-    pr: (id: number) => get<Pr>('SELECT * FROM prs WHERE id = ?', id),
-    prByUrl: (url: string) => get<Pr>('SELECT * FROM prs WHERE url = ?', url),
-    prs: () => all<Pr>('SELECT * FROM prs ORDER BY repo, number'),
+    updatePr,
+    insertPr,
+    pr: (id: number) => get<Pr>('SELECT * FROM pr_view WHERE id = ?', id),
+    prByUrl: (url: string) => get<Pr>('SELECT * FROM pr_view WHERE url = ?', url),
+    prs: () => all<Pr>('SELECT * FROM pr_view ORDER BY repo, number'),
+    /** PRs matching a condition on the columns of `pr_view`, written by our own code. */
+    prsWhere: (condition: string, ...params: SQLInputValue[]) => all<Pr>(`SELECT * FROM pr_view WHERE ${condition}`, ...params),
     /** Sessions pr-manager started; an interactive session is any other. */
     ownSessionIds: () =>
       new Set(all<{ session_id: string }>('SELECT session_id FROM prs WHERE session_id IS NOT NULL').map((r) => r.session_id)),
@@ -354,22 +331,12 @@ export function openDb(path = join(config.stateDir, 'pr-manager.db')) {
       // One queued item per kind and PR is enough; the session sees the current state anyway.
       const existing = get<WorkItem>(`SELECT * FROM work_items WHERE pr_id = ? AND kind = ? AND state = 'queued'`, prId, kind);
       if (existing) return existing.id;
-      return insert('work_items', { pr_id: prId, kind, payload: payload === undefined ? null : JSON.stringify(payload) });
+      return add('work_items', { pr_id: prId, kind, payload: payload === undefined ? null : JSON.stringify(payload) });
     },
     kvGet: (key: string) => get<{ value: string }>('SELECT value FROM kv WHERE key = ?', key)?.value,
     kvSet: (key: string, value: string) =>
       run('INSERT INTO kv (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value', key, value),
-    transaction: <T>(fn: () => T): T => {
-      db.exec('BEGIN');
-      try {
-        const res = fn();
-        db.exec('COMMIT');
-        return res;
-      } catch (e) {
-        db.exec('ROLLBACK');
-        throw e;
-      }
-    },
+    transaction,
   };
 }
 

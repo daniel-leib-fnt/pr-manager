@@ -1,11 +1,14 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { addConflict, applyPredecisions, draftThreadReply, enqueueReReview, recheckAfterPush, submitDecisions } from '../server/actions.ts';
+import type { CommentKind, CommentState, Decision, OwnPr, ReviewPr } from '../server/model.ts';
+import { addConflict, applyPredecisions, recheckAfterPush, submitDecisions } from '../server/roles/own-batch.ts';
+import { draftThreadReply } from '../server/roles/review-tools.ts';
+import { enqueueReReview } from '../server/roles/review.ts';
 import { openDb } from '../server/db.ts';
 
 test('one open conflict per PR from the poll, a new one for every failed rebase at batch close', () => {
   const db = openDb(':memory:');
-  const id = db.insert('prs', {
+  const id = db.insertPr({
     url: 'u',
     repo: 'o/r',
     number: 1,
@@ -16,20 +19,20 @@ test('one open conflict per PR from the poll, a new one for every failed rebase 
     head_sha: 'a1',
     base_ref: 'main',
   });
-  const pr = db.pr(id)!;
+  const pr = db.pr(id) as OwnPr;
   assert.equal(addConflict(db, pr, 'a1', 'b1'), true);
-  assert.equal(db.pr(id)!.batch_head_sha, 'a1');
+  assert.equal((db.pr(id) as OwnPr).batch_head_sha, 'a1');
   assert.equal(addConflict(db, pr, 'a1', 'b2'), false);
   db.run(`UPDATE comments SET state = 'fixed'`);
   assert.equal(addConflict(db, pr, 'a2', 'b2'), false);
   assert.equal(addConflict(db, pr, 'a2', 'b2', true), true);
   assert.equal(addConflict(db, pr, 'a2', 'b2', true), false, 'the same failed rebase again blocks instead of looping');
-  assert.equal(db.pr(id)!.batch_head_sha, 'a1');
+  assert.equal((db.pr(id) as OwnPr).batch_head_sha, 'a1');
 });
 
 test('pre-decisions wait while anything is open, then take effect together', () => {
   const db = openDb(':memory:');
-  const id = db.insert('prs', {
+  const id = db.insertPr({
     url: 'u',
     repo: 'o/r',
     number: 1,
@@ -40,8 +43,8 @@ test('pre-decisions wait while anything is open, then take effect together', () 
     head_sha: 'a1',
     base_ref: 'main',
   });
-  const pr = db.pr(id)!;
-  const add = (decision: string | null) =>
+  const pr = db.pr(id) as OwnPr;
+  const add = (decision: Decision | null) =>
     db.insert('comments', { pr_id: id, kind: 'thread', gh_key: `k${decision}`, body: 'b', state: 'proposal', proposal: 'p', decision });
   const accept = add('accept');
   const skip = add('skip');
@@ -61,7 +64,7 @@ test('pre-decisions wait while anything is open, then take effect together', () 
 });
 
 const reviewPr = (db: ReturnType<typeof openDb>) =>
-  db.insert('prs', {
+  db.insertPr({
     url: 'u',
     repo: 'o/r',
     number: 1,
@@ -96,9 +99,9 @@ test('a later reply draft replaces the one of the same thread', () => {
 test('reviewing again is a full review until I submitted one, then a follow-up', () => {
   const db = openDb(':memory:');
   const id = reviewPr(db);
-  enqueueReReview(db, db.pr(id)!, 'pushed');
-  db.update('prs', id, { reviewed_sha: 'a1' });
-  enqueueReReview(db, db.pr(id)!);
+  enqueueReReview(db, db.pr(id) as ReviewPr, 'pushed');
+  db.updatePr(id, { reviewed_sha: 'a1' });
+  enqueueReReview(db, db.pr(id) as ReviewPr);
   assert.deepEqual(
     db.workItems(id).map((w) => [w.kind, w.payload]),
     [
@@ -110,7 +113,7 @@ test('reviewing again is a full review until I submitted one, then a follow-up',
 
 test('a push from outside sends open proposals of remarks back to triage', () => {
   const db = openDb(':memory:');
-  const id = db.insert('prs', {
+  const id = db.insertPr({
     url: 'u',
     repo: 'o/r',
     number: 1,
@@ -121,13 +124,13 @@ test('a push from outside sends open proposals of remarks back to triage', () =>
     head_sha: 'a1',
     base_ref: 'main',
   });
-  assert.equal(recheckAfterPush(db, db.pr(id)!), false, 'nothing open, nothing to check');
-  const add = (kind: string, state: string) =>
+  assert.equal(recheckAfterPush(db, db.pr(id) as OwnPr), false, 'nothing open, nothing to check');
+  const add = (kind: CommentKind, state: CommentState) =>
     db.insert('comments', { pr_id: id, kind, gh_key: `${kind}:${state}`, body: 'b', state, proposal: 'p', decision: 'accept' });
   const thread = add('thread', 'proposal');
   const ci = add('ci', 'proposal');
   const fixed = add('thread', 'fixed');
-  assert.equal(recheckAfterPush(db, db.pr(id)!), true);
+  assert.equal(recheckAfterPush(db, db.pr(id) as OwnPr), true);
   assert.deepEqual([db.comment(thread)!.state, db.comment(thread)!.decision], ['new', null]);
   assert.equal(db.comment(ci)!.state, 'proposal', 'a CI proposal belongs to its head');
   assert.equal(db.comment(fixed)!.state, 'fixed');
@@ -139,7 +142,7 @@ test('a push from outside sends open proposals of remarks back to triage', () =>
 
 test('a push from outside makes the agent look at its open questions again', () => {
   const db = openDb(':memory:');
-  const id = db.insert('prs', {
+  const id = db.insertPr({
     url: 'u',
     repo: 'o/r',
     number: 1,
@@ -151,13 +154,13 @@ test('a push from outside makes the agent look at its open questions again', () 
     base_ref: 'main',
   });
   db.insert('questions', { pr_id: id, question: 'q' });
-  assert.equal(recheckAfterPush(db, db.pr(id)!), true);
+  assert.equal(recheckAfterPush(db, db.pr(id) as OwnPr), true);
   assert.equal(db.workItems(id).length, 1);
 });
 
 test("pre-decisions that take effect without me are the agent's, and new activity restarts the veto window", () => {
   const db = openDb(':memory:');
-  const id = db.insert('prs', {
+  const id = db.insertPr({
     url: 'u',
     repo: 'o/r',
     number: 1,
@@ -180,11 +183,11 @@ test("pre-decisions that take effect without me are the agent's, and new activit
     proposal: 'p',
     decision: 'accept',
   });
-  assert.equal(applyPredecisions(db, db.pr(id)!), true);
+  assert.equal(applyPredecisions(db, db.pr(id) as OwnPr), true);
   assert.equal(db.comment(c)!.by_agent, 1);
 
-  addConflict(db, db.pr(id)!, 'a1', 'b1');
-  assert.equal(db.pr(id)!.push_after, null);
-  assert.equal(db.pr(id)!.self_review_state, null, 'a failed review is retried on what comes next');
-  assert.equal(db.pr(id)!.self_review_round, 1, 'activity that is not mine gives no new correction round');
+  addConflict(db, db.pr(id) as OwnPr, 'a1', 'b1');
+  assert.equal((db.pr(id) as OwnPr).push_after, null);
+  assert.equal((db.pr(id) as OwnPr).self_review_state, null, 'a failed review is retried on what comes next');
+  assert.equal((db.pr(id) as OwnPr).self_review_round, 1, 'activity that is not mine gives no new correction round');
 });

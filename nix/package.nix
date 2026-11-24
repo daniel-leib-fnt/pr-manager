@@ -13,6 +13,8 @@ let
       fileset = lib.fileset.unions (
         workspace
         ++ [
+          # The API types the web app shares with the server.
+          ../server/model.ts
           (lib.fileset.difference ../web (
             lib.fileset.unions (map lib.fileset.maybeMissing [ ../web/node_modules ../web/.angular ../web/dist ])
           ))

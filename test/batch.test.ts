@@ -1,19 +1,18 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
-  type SelfReviewResult,
   addActiveMinutes,
   batchAutonomy,
   batchStatus,
   mayDecide,
-  reReviewReason,
   readyToClose,
   replyFor,
   reviewOutcome,
   shouldResolve,
   vetoApplies,
 } from '../server/batch.ts';
-import type { Comment, Pr, Question, WorkItem } from '../server/db.ts';
+import type { Comment, OwnPr, Question, ReviewState, SelfReviewResult, WorkItem } from '../server/model.ts';
+import { reReviewReason } from '../server/roles/review.ts';
 
 const comment = (over: Partial<Comment>): Comment => ({
   id: 1,
@@ -70,7 +69,10 @@ const work = (kind: WorkItem['kind'], state: WorkItem['state']): WorkItem => ({
   started_at: null,
   finished_at: null,
 });
-const pr = (over: Partial<Pr> = {}): Pr => ({ role: 'own', state: 'open', paused: 0, blocked: null, last_event_at: null, ...over }) as Pr;
+const pr = (over: Partial<OwnPr> = {}): OwnPr =>
+  ({ role: 'own', state: 'open', paused: 0, blocked: null, last_event_at: null, ...over }) as OwnPr;
+const quiet = (quietMs: number, autonomy = false) => ({ quietMs, autonomy });
+const HEADER = '🤖 **Claude on behalf of @{viewer}**';
 
 test('no comments means no batch', () => {
   assert.equal(batchStatus([], [], []), 'none');
@@ -96,29 +98,29 @@ test('fixed or skipped comments make the batch closable', () => {
 
 test('a closable batch waits for the quiet interval', () => {
   const t = Date.parse('2026-10-29T10:00:00Z');
-  assert.equal(readyToClose(pr({ last_event_at: '2026-10-29T09:59:00Z' }), 'closable', 120_000, t), false);
-  assert.equal(readyToClose(pr({ last_event_at: '2026-10-29T09:57:00Z' }), 'closable', 120_000, t), true);
-  assert.equal(readyToClose(pr({ paused: 1 }), 'closable', 0, t), false);
-  assert.equal(readyToClose(pr({ blocked: 'x' }), 'closable', 0, t), false);
-  assert.equal(readyToClose(pr({ role: 'review' }), 'closable', 0, t), false);
-  assert.equal(readyToClose(pr(), 'open', 0, t), false);
+  assert.equal(readyToClose(pr({ last_event_at: '2026-10-29T09:59:00Z' }), 'closable', quiet(120_000), t), false);
+  assert.equal(readyToClose(pr({ last_event_at: '2026-10-29T09:57:00Z' }), 'closable', quiet(120_000), t), true);
+  assert.equal(readyToClose(pr({ paused: 1 }), 'closable', quiet(0), t), false);
+  assert.equal(readyToClose(pr({ blocked: 'x' }), 'closable', quiet(0), t), false);
+  assert.equal(readyToClose(pr(), 'open', quiet(0), t), false);
 });
 
 test('replies carry the header unless I wrote them myself', () => {
-  assert.equal(replyFor(comment({ state: 'fixed', reply_draft: 'Renamed.' }), 'me'), '🤖 **Claude on behalf of @me**\n\nRenamed.');
-  assert.equal(replyFor(comment({ state: 'fixed', reply_draft: 'Renamed.', reply_edited: 1 }), 'me'), 'Renamed.');
-  assert.equal(replyFor(comment({ state: 'skipped', skip_reason: 'Out of scope.', reply_edited: 1 }), 'me'), 'Out of scope.');
+  assert.equal(replyFor(comment({ state: 'fixed', reply_draft: 'Renamed.' }), 'me', HEADER), '🤖 **Claude on behalf of @me**\n\nRenamed.');
+  assert.equal(replyFor(comment({ state: 'fixed', reply_draft: 'Renamed.', reply_edited: 1 }), 'me', HEADER), 'Renamed.');
+  assert.equal(replyFor(comment({ state: 'skipped', skip_reason: 'Out of scope.', reply_edited: 1 }), 'me', HEADER), 'Out of scope.');
   assert.equal(
-    replyFor(comment({ state: 'skipped', skip_reason: 'Out of scope.' }), 'me'),
+    replyFor(comment({ state: 'skipped', skip_reason: 'Out of scope.' }), 'me', HEADER),
     '🤖 **Claude on behalf of @me**\n\nOut of scope.',
   );
-  assert.equal(replyFor(comment({ state: 'skipped' }), 'me'), null);
-  assert.equal(replyFor(comment({ state: 'fixed', kind: 'ci', reply_draft: 'x' }), 'me'), null);
-  assert.equal(replyFor(comment({ state: 'fixed', kind: 'instruction', reply_draft: 'x' }), 'me'), null);
+  assert.equal(replyFor(comment({ state: 'skipped' }), 'me', HEADER), null);
+  assert.equal(replyFor(comment({ state: 'fixed', kind: 'ci', reply_draft: 'x' }), 'me', HEADER), null);
+  assert.equal(replyFor(comment({ state: 'fixed', kind: 'instruction', reply_draft: 'x' }), 'me', HEADER), null);
 });
 
 test('threads are resolved when fixed or skipped with a reason', () => {
-  const one = (c: Comment) => shouldResolve(c, [c]);
+  const MODE = 'fixed_and_skipped_with_reason';
+  const one = (c: Comment) => shouldResolve(c, [c], MODE);
   assert.equal(one(comment({ state: 'fixed' })), true);
   assert.equal(one(comment({ state: 'skipped', skip_reason: 'no' })), true);
   assert.equal(one(comment({ state: 'skipped' })), false);
@@ -129,17 +131,20 @@ test('threads are resolved when fixed or skipped with a reason', () => {
 test('a thread with checklist lines is resolved once, after its last line is settled', () => {
   const a = comment({ id: 1, state: 'fixed', task: 'a' });
   const b = comment({ id: 2, state: 'fixed', task: 'b' });
-  assert.deepEqual([shouldResolve(a, [a, b]), shouldResolve(b, [a, b])], [false, true]);
+  assert.deepEqual(
+    [shouldResolve(a, [a, b], 'fixed_and_skipped_with_reason'), shouldResolve(b, [a, b], 'fixed_and_skipped_with_reason')],
+    [false, true],
+  );
   const open = comment({ id: 2, state: 'new', task: 'b' });
-  assert.equal(shouldResolve(a, [a, open]), false);
+  assert.equal(shouldResolve(a, [a, open], 'fixed_and_skipped_with_reason'), false);
   const skipped = comment({ id: 2, state: 'skipped', task: 'b' });
-  assert.equal(shouldResolve(a, [a, skipped]), false);
+  assert.equal(shouldResolve(a, [a, skipped], 'fixed_and_skipped_with_reason'), false);
   const earlier = comment({ id: 2, state: 'done', task: 'b' });
-  assert.equal(shouldResolve(a, [a, earlier]), true);
+  assert.equal(shouldResolve(a, [a, earlier], 'fixed_and_skipped_with_reason'), true);
 });
 
 test('a new review starts on a re-request, and on a push only while my draft answers an open request', () => {
-  const prev = (review_state: Pr['review_state'], in_review_search: number) => ({ review_state, in_review_search, head_sha: 'a1' });
+  const prev = (review_state: ReviewState, in_review_search: number) => ({ review_state, in_review_search, head_sha: 'a1' });
   assert.equal(reReviewReason(prev('submitted', 0), true, 'a1'), 'reRequested');
   assert.equal(reReviewReason(prev('draft', 0), true, 'a1'), 'reRequested', 'a draft does not hide the re-request');
   assert.equal(reReviewReason(prev('draft', 1), true, 'a2'), 'pushed');
@@ -212,4 +217,15 @@ test('the veto window counts only active days and hours', () => {
   assert.deepEqual(addActiveMinutes(at(28, 12), 60, active), at(30, 8), 'started on a Saturday');
   assert.deepEqual(addActiveMinutes(at(23, 5), 30, active), at(23, 7, 30), 'started before the active hours');
   assert.deepEqual(addActiveMinutes(at(23, 9), 60, { days: [], from: 7, to: 18 }), at(23, 10), 'without active days the wall clock counts');
+});
+
+test('with autonomy, a failed self-review and a running veto window hold the push back', () => {
+  const now = Date.parse('2026-11-24T10:00:00Z');
+  const held = [pr({ self_review_state: 'failed' }), pr({ push_after: '2026-11-24T11:00:00Z' })];
+  for (const p of held) assert.equal(readyToClose(p, 'closable', quiet(0), now), true, 'ignored while autonomy is off');
+  for (const p of held) assert.equal(readyToClose(p, 'closable', quiet(0, true), now), false);
+  assert.equal(
+    readyToClose(pr({ self_review_state: 'passed', push_after: '2026-11-24T09:00:00Z' }), 'closable', quiet(0, true), now),
+    true,
+  );
 });

@@ -1,35 +1,14 @@
-import type { Comment, Pr, Question, WorkItem, WorkKind } from './db.ts';
-import { autonomyLimits, setting } from './settings.ts';
-
-/** Whether a review may start: a green build (see `buildState`), or waiting is switched off. */
-export const buildGreen = (pr: Pick<Pr, 'check_state'>) => !setting('reviewWaitForGreenBuild') || pr.check_state === 'SUCCESS';
-
-const REVIEW_KINDS = new Set<WorkKind>(['review', 'followup_review']);
-
-/** Whether a queued item may run now; reviews are held back until the build is green. */
-export const runnable = (pr: Pick<Pr, 'check_state'>, kind: WorkKind) => !REVIEW_KINDS.has(kind) || buildGreen(pr);
+import type { BatchStatus, Comment, Confidence, OwnPr, Question, RiskClass, SelfReviewResult, WorkItem } from './model.ts';
 
 /**
- * Why a new review starts by itself on a PR I review: my review was re-requested, or the head moved while a
- * request is unanswered and my draft, written for the old head, is not submitted. A push after a submitted
- * review starts nothing: the author asks again when the PR is ready.
+ * The rules of a batch on one of my PRs, as pure functions: what is settled by the arguments alone, with
+ * no database, no settings and no clock of their own.
  */
-export function reReviewReason(
-  prev: Pick<Pr, 'review_state' | 'in_review_search' | 'head_sha'>,
-  inReviewSearch: boolean,
-  headSha: string,
-): 'reRequested' | 'pushed' | null {
-  if (!inReviewSearch || prev.review_state === 'none') return null;
-  if (!prev.in_review_search) return 'reRequested';
-  return prev.review_state === 'draft' && prev.head_sha !== headSha ? 'pushed' : null;
-}
 
 /** Comments that still need the agent or me before the batch can be pushed. */
 const OPEN_STATES = new Set(['new', 'proposal', 'accepted']);
 /** Comments whose result (push, reply, resolve) still has to reach GitHub. */
 const PENDING_STATES = new Set(['fixed', 'skipped']);
-
-type BatchStatus = 'none' | 'open' | 'closable';
 
 export function batchStatus(comments: Comment[], questions: Question[], work: WorkItem[]): BatchStatus {
   const open =
@@ -41,22 +20,25 @@ export function batchStatus(comments: Comment[], questions: Question[], work: Wo
 }
 
 /** A closable batch is closed only after no new activity for `quietMs`. */
-export function readyToClose(pr: Pr, status: BatchStatus, quietMs: number, now = Date.now()): boolean {
-  if (pr.role !== 'own' || pr.state !== 'open' || status !== 'closable' || pr.paused || pr.blocked) return false;
+export function readyToClose(pr: OwnPr, status: BatchStatus, rules: { quietMs: number; autonomy: boolean }, now = Date.now()): boolean {
+  if (pr.state !== 'open' || status !== 'closable' || pr.paused || pr.blocked) return false;
   // A failed self-review waits for me, and a veto window for its end.
-  if (setting('autonomy') && (pr.self_review_state === 'failed' || (pr.push_after && now < Date.parse(pr.push_after)))) return false;
-  return !pr.last_event_at || now - Date.parse(pr.last_event_at) >= quietMs;
+  if (rules.autonomy && (pr.self_review_state === 'failed' || (pr.push_after && now < Date.parse(pr.push_after)))) return false;
+  return !pr.last_event_at || now - Date.parse(pr.last_event_at) >= rules.quietMs;
 }
 
-/** Replies posted for a comment when the batch closes, or null for none. */
-export function replyFor(c: Comment, viewer: string): string | null {
+/**
+ * Replies posted for a comment when the batch closes, or null for none. `replyHeader` is the setting of
+ * that name, with `{viewer}` standing for my login.
+ */
+export function replyFor(c: Comment, viewer: string, replyHeader: string): string | null {
   if (c.kind === 'ci' || c.kind === 'instruction' || c.kind === 'conflict' || c.kind === 'self_review') return null;
   let text: string | null = null;
   if (c.state === 'fixed') text = c.reply_draft?.trim() || null;
   if (c.state === 'skipped') text = c.skip_reason?.trim() || null;
   if (!text) return null;
   // Only text I wrote myself goes out without the header.
-  const header = setting('replyHeader').replaceAll('{viewer}', viewer).trim();
+  const header = replyHeader.replaceAll('{viewer}', viewer).trim();
   return !c.reply_edited && header ? `${header}\n\n${text}` : text;
 }
 
@@ -66,12 +48,11 @@ const settled = (c: Comment, mode: string) =>
   (mode === 'fixed_and_skipped_with_reason' && c.state === 'skipped' && !!c.skip_reason?.trim());
 
 /**
- * Threads resolved after the reply, as configured in resolveThreads. A thread with checklist lines is
- * resolved only once every item of it is settled, so the last one resolves it.
+ * Threads resolved after the reply, as configured in the setting resolveThreads (`mode`). A thread with
+ * checklist lines is resolved only once every item of it is settled, so the last one resolves it.
  */
-export function shouldResolve(c: Comment, all: Comment[]): boolean {
+export function shouldResolve(c: Comment, all: Comment[], mode: string): boolean {
   if (c.kind !== 'thread' || !c.thread_id) return false;
-  const mode = setting('resolveThreads');
   if (mode === 'never' || !settled(c, mode)) return false;
   const thread = all.filter((x) => x.thread_id === c.thread_id && x.state !== 'gone');
   if (!thread.some((x) => x.task)) return true;
@@ -81,9 +62,8 @@ export function shouldResolve(c: Comment, all: Comment[]): boolean {
 
 // --- Autonomy: what the agent may decide, the self-review before a push, the veto window ---
 
-export type RiskClass = 'local' | 'contained' | 'structural';
-export type Confidence = 'high' | 'medium' | 'low';
-type Limits = ReturnType<typeof autonomyLimits>;
+/** The least confidence at which the agent may decide a change of that class alone. */
+export type Limits = Record<'contained' | 'structural', Confidence | 'never'>;
 
 const RANK: Record<Confidence, number> = { low: 1, medium: 2, high: 3 };
 
@@ -104,14 +84,6 @@ export function batchAutonomy(comments: Comment[]) {
     autonomous: pending.length > 0 && pending.every((c) => c.by_agent || c.auto),
     aboveLocal: pending.some((c) => c.by_agent && !!c.risk && c.risk !== 'local'),
   };
-}
-
-export interface SelfReviewResult {
-  riskClass: RiskClass;
-  verdict: 'pass' | 'changes';
-  route?: 'auto-fixable' | 'escalate';
-  summary: string;
-  findings: { path?: string; line?: number; body: string }[];
 }
 
 type ReviewOutcome = { state: 'passed' } | { state: 'fix' } | { state: 'failed'; reason: string };
@@ -142,7 +114,7 @@ export function reviewOutcome(review: SelfReviewResult | undefined, round: numbe
 }
 
 /** Whether a passed batch waits out the veto window: only one the agent decided alone, with a change above small. */
-export function vetoApplies(comments: Comment[], review: SelfReviewResult | null): boolean {
+export function vetoApplies(comments: Comment[], review: Pick<Partial<SelfReviewResult>, 'riskClass'> | null): boolean {
   const a = batchAutonomy(comments);
   return a.autonomous && (a.aboveLocal || (!!review && review.riskClass !== 'local'));
 }
