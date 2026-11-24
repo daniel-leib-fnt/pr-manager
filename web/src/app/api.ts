@@ -1,188 +1,26 @@
 import { HttpClient } from '@angular/common/http';
 import { Injectable, inject, signal } from '@angular/core';
 import { Observable, Subject, firstValueFrom } from 'rxjs';
+import type { DeniedCall, LiveEvent, NixOnly, PrDetail, PrSummary as Pr, Setting } from '../../../server/model';
 
-export type Group = 'ready' | 'needs_me' | 'working' | 'queued' | 'push' | 'out_of_date' | 'waiting' | 'ignored' | 'closed';
-
-export interface Pr {
-  id: number;
-  url: string;
-  repo: string;
-  number: number;
-  title: string;
-  author: string;
-  role: 'own' | 'review';
-  head_ref: string;
-  head_sha: string;
-  base_ref: string;
-  is_draft: number;
-  state: 'open' | 'merged' | 'closed' | 'dropped';
-  check_state: string | null;
-  summary: string | null;
-  worktree: string | null;
-  session_id: string | null;
-  paused: number;
-  blocked: string | null;
-  agent_running: number;
-  review_state: 'none' | 'draft' | 'submitted';
-  review_verdict: 'APPROVE' | 'REQUEST_CHANGES' | 'COMMENT' | null;
-  review_body: string | null;
-  /** The commit the review draft was written for. */
-  review_draft_sha: string | null;
-  reviewed_sha: string | null;
-  review_out_of_date: number;
-  ignored: number;
-  ready: number;
-  /** Why the worktree of a merged PR was kept instead of removed. */
-  kept: string | null;
-  /** passed or failed once the self-review of the open batch ran; failed holds the push until I act. */
-  self_review_state: 'passed' | 'failed' | null;
-  /** JSON SelfReview of the open batch. */
-  self_review_result: string | null;
-  /** End of the veto window of a batch the agent decided alone, ISO 8601. */
-  push_after: string | null;
-  /** GitHub's last update of the PR, ISO 8601. */
-  gh_updated_at: string;
-  group: Group;
-  running: boolean;
-  batch: 'none' | 'open' | 'closable';
-  waitingForBuild: boolean;
-  counts: { proposals: number; questions: number; pending: number; findings: number };
-}
-
-/** A few lines of the file a comment or finding points to, read from the PR's worktree. */
-export interface Excerpt {
-  /** Number of the first line in `text`, 1-based. */
-  start: number;
-  line: number;
-  text: string;
-}
-
-export interface Comment {
-  id: number;
-  kind: 'thread' | 'issue_comment' | 'review_body' | 'ci' | 'instruction' | 'conflict' | 'self_review';
-  author: string | null;
-  body: string;
-  path: string | null;
-  line: number | null;
-  url: string | null;
-  state: 'new' | 'fixed' | 'proposal' | 'accepted' | 'skipped' | 'done' | 'gone';
-  proposal: string | null;
-  reply_draft: string | null;
-  skip_reason: string | null;
-  /** On a proposal the agent's pre-decision (null: mine to make); afterwards the decision taken. */
-  decision: 'accept' | 'reject' | 'reply' | 'skip' | null;
-  auto: number;
-  /** With autonomy: how the agent rated a proposal that changes code. */
-  risk: 'local' | 'contained' | 'structural' | null;
-  confidence: 'high' | 'medium' | 'low' | null;
-  reason: string | null;
-  note: string | null;
-  /** The checklist line this item stands for; null for a whole comment. */
-  task: string | null;
-  clarify: number;
-  updated_at: string;
-  excerpt: Excerpt | null;
-}
-
-/** Result of the read-only review a batch gets before it is pushed; `reason` says why it did not pass. */
-export interface SelfReview {
-  riskClass?: 'local' | 'contained' | 'structural';
-  verdict?: 'pass' | 'changes';
-  route?: 'auto-fixable' | 'escalate';
-  summary?: string;
-  findings?: { path?: string; line?: number; body: string }[];
-  reason: string | null;
-}
-
-export interface Question {
-  id: number;
-  comment_id: number | null;
-  question: string;
-  options: string | null;
-  answer: string | null;
-  state: 'open' | 'answered' | 'sent' | 'withdrawn';
-}
-
-export interface Finding {
-  id: number;
-  kind: 'finding' | 'thread_reply';
-  thread_id: string | null;
-  path: string | null;
-  line: number | null;
-  in_diff: number;
-  /** 1 on a thread reply whose thread is resolved when the review is submitted. */
-  resolve: number;
-  body: string;
-  state: 'draft' | 'skipped' | 'submitted';
-  url: string | null;
-  excerpt: Excerpt | null;
-}
-
-/** A review thread my review draft is about, as it was when the agent last wrote to the draft. */
-export interface ReviewThread {
-  threadId: string;
-  path: string;
-  line: number | null;
-  resolved: boolean;
-  url: string | null;
-  comments: { author: string; at: string; body: string }[];
-  excerpt: Excerpt | null;
-}
-
-export interface WorkItem {
-  id: number;
-  kind: string;
-  state: 'queued' | 'in_progress' | 'done' | 'failed';
-  error: string | null;
-  created_at: string;
-  finished_at: string | null;
-}
-
-export interface PrDetail {
-  pr: Pr;
-  comments: Comment[];
-  questions: Question[];
-  findings: Finding[];
-  threads: ReviewThread[];
-  work: WorkItem[];
-}
-
-export interface Setting {
-  key: string;
-  group: string;
-  label: string;
-  help: string | null;
-  type: 'number' | 'boolean' | 'string' | 'text' | 'list' | 'map' | 'enum' | 'multi' | 'days';
-  options: { value: string; label: string }[] | null;
-  value: unknown;
-  source: 'override' | 'nix' | 'default';
-  nixValue: unknown;
-  defaultValue: unknown;
-}
-
-export interface NixOnly {
-  label: string;
-  value: string;
-  option: string;
-}
-
-export interface DeniedCall {
-  at: string;
-  pr: string;
-  tool: string;
-  detail: string;
-  rule: string;
-}
-
-export interface LiveEvent {
-  type: 'pr' | 'message' | 'denied';
-  prId: number;
-  message?: unknown;
-  tool?: string;
-  detail?: string;
-  at?: string;
-}
+export type {
+  Group,
+  Excerpt,
+  SelfReview,
+  Question,
+  WorkItem,
+  PrDetail,
+  Setting,
+  NixOnly,
+  DeniedCall,
+  LiveEvent,
+  OwnPrSummary,
+  ReviewPrSummary,
+  PrSummary as Pr,
+  CommentView as Comment,
+  FindingView as Finding,
+  ReviewThreadView as ReviewThread,
+} from '../../../server/model';
 
 @Injectable({ providedIn: 'root' })
 export class Api {

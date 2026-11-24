@@ -95,7 +95,7 @@ export class Home {
       .filter((p) => p.group === 'needs_me')
       .sort((a, b) => a.gh_updated_at.localeCompare(b.gh_updated_at)),
   );
-  protected readonly drafts = computed(() => this.needsMe().filter((p) => p.review_state === 'draft').length);
+  protected readonly drafts = computed(() => this.needsMe().filter((p) => p.role === 'review' && p.review_state === 'draft').length);
   protected readonly blocked = computed(() => this.needsMe().filter((p) => p.blocked).length);
 
   constructor() {
