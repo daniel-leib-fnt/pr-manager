@@ -177,6 +177,8 @@ function saveDraft(id: number, draft: Draft) {
                   <div class="menu" role="menu">
                     @if (d.pr.role === 'review') {
                       <button role="menuitem" (click)="act('followup-review')">Review again</button>
+                    } @else if (d.pr.counts.proposals || d.pr.counts.questions) {
+                      <button role="menuitem" (click)="act('followup-review')">Check open items again</button>
                     }
                     @if (d.pr.session_id && !d.pr.agent_running) {
                       <button role="menuitem" (click)="confirmAct('reset-session', 'Start a fresh agent session for this PR?')">
@@ -575,7 +577,7 @@ function saveDraft(id: number, draft: Draft) {
                     }
                     <textarea rows="2" placeholder="Answer" [(ngModel)]="draft().answers[q.id]" (ngModelChange)="persist()"></textarea>
                   } @else {
-                    <p class="muted small">Answer: {{ q.answer }}</p>
+                    <p class="muted small">{{ q.state === 'withdrawn' ? 'Withdrawn' : 'Answer' }}: {{ q.answer }}</p>
                   }
                 }
               </div>

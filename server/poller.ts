@@ -1,5 +1,5 @@
 import { deleteSession } from '@anthropic-ai/claude-agent-sdk';
-import { addConflict, enqueueReReview, openBatch } from './actions.ts';
+import { addConflict, enqueueReReview, openBatch, recheckAfterPush } from './actions.ts';
 import { batchStatus, buildGreen, reReviewReason, readyToClose } from './batch.ts';
 import { type TaskSource, hasTasks, parseTasks, taskKeys } from './checklist.ts';
 import { type Comment, type Db, type Pr, type PrState, now } from './db.ts';
@@ -135,6 +135,8 @@ export function createPoller({ db, dashboardUrl }: PollerDeps) {
       const ciUnseen = pr.check_state === 'FAILURE' && !db.comments(pr.id).some((c) => c.gh_key === `ci:${gh.headRefOid}`);
       // Losing the ready state means something changed on GitHub: look at the PR again, even if its update time did not move.
       if (isChanged || lostReady || ciUnseen) await ingest(pr, me);
+      // The daemon records the head it pushes itself, so a head that moved here was pushed by someone else.
+      if (prev.head_sha !== gh.headRefOid) recheckAfterPush(db, pr);
       // A moving base does not change the PR's update time, so conflicts are checked on every poll.
       if (gh.mergeStateStatus === 'DIRTY') addConflict(db, pr, gh.headRefOid, gh.baseRefOid);
       if (prev.ready !== pr.ready) changed(pr.id);

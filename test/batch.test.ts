@@ -132,3 +132,7 @@ test('a new review starts on a re-request, and on a push only while my draft ans
   assert.equal(reReviewReason(prev('draft', 0), false, 'a2'), null, 'a draft without a request is not renewed');
   assert.equal(reReviewReason(prev('none', 1), true, 'a2'), null, 'the first review has its own trigger');
 });
+
+test('a withdrawn question does not keep the batch open', () => {
+  assert.equal(batchStatus([comment({ state: 'fixed' })], [question('withdrawn')], []), 'closable');
+});

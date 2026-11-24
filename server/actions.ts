@@ -116,6 +116,27 @@ export async function adoptBatchHead(db: Db, pr: Pr, sha: string, path: string):
   return reopened;
 }
 
+/** Comment kinds whose proposal can be settled by a push: what a person wrote, not CI runs or conflicts of the old head. */
+const REMARKS = new Set(['thread', 'issue_comment', 'review_body']);
+
+/**
+ * Someone other than the daemon pushed to one of my PRs, for example me by hand. What the agent proposed or asked
+ * for the old head may be settled now, so open proposals go back to triage and the agent looks at its open
+ * questions again. Returns whether the agent has work.
+ */
+export function recheckAfterPush(db: Db, pr: Pr): boolean {
+  const proposals = db.comments(pr.id).filter((c) => c.state === 'proposal' && REMARKS.has(c.kind));
+  if (!proposals.length && !db.questions(pr.id).some((q) => q.state === 'open')) return false;
+  db.transaction(() => {
+    for (const c of proposals)
+      db.update('comments', c.id, { state: 'new', decision: null, note: 'The branch was pushed to meanwhile; checked again.' });
+    db.update('prs', pr.id, { last_event_at: now() });
+    db.enqueue(pr.id, 'comments', { pushed: true });
+  });
+  changed(pr.id);
+  return true;
+}
+
 const gone = (e: unknown) =>
   e instanceof GithubError && (e.status === 404 || e.status === 422 || /NOT_FOUND|Could not resolve/i.test(e.message));
 

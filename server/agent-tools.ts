@@ -113,7 +113,11 @@ export function createAgentTools(
           .questions(prId)
           .filter((q) => q.state === 'answered')
           .map((q) => ({ question: q.question, answer: q.answer, commentId: q.comment_id }));
-        return ok(JSON.stringify({ ...base, openItems: items, answeredQuestions: answered }, null, 2));
+        const openQuestions = db
+          .questions(prId)
+          .filter((q) => q.state === 'open')
+          .map((q) => ({ questionId: q.id, question: q.question, commentId: q.comment_id }));
+        return ok(JSON.stringify({ ...base, openItems: items, answeredQuestions: answered, openQuestions }, null, 2));
       }
       const me = await viewer();
       const threads = d.reviewThreads.nodes.map((t) => ({
@@ -252,6 +256,18 @@ export function createAgentTools(
         if (commentId !== undefined && !ownComment(commentId)) return fail(`Unknown comment ${commentId}.`);
         db.insert('questions', { pr_id: prId, comment_id: commentId ?? null, question, options: options ? JSON.stringify(options) : null });
         return touched(ok('Question saved. Finish your turn now; the answer arrives later.'));
+      },
+    ),
+
+    def(
+      'withdraw_question',
+      'Takes back a question I have not answered yet, because the code at HEAD settles it. The reason is shown to me in its place.',
+      { questionId: z.number(), reason: z.string() },
+      async ({ questionId, reason }) => {
+        const q = db.questions(prId).find((x) => x.id === questionId);
+        if (!q || q.state !== 'open') return fail(`Question ${questionId} is not an open question of this PR.`);
+        db.update('questions', questionId, { state: 'withdrawn', answer: reason });
+        return touched(ok(`Question ${questionId} withdrawn.`));
       },
     ),
 

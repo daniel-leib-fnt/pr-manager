@@ -147,6 +147,10 @@ export function createRunner({ db, poller, dashboardUrl }: RunnerDeps) {
       parts.push(
         'There is new activity on this PR. Call get_pr and handle every open item as the workflow describes. Update the summary if it is outdated.',
       );
+    if (items.some((i) => i.kind === 'comments' && i.payload?.includes('pushed')))
+      parts.push(
+        'The branch was pushed to from outside pr-manager. Items you triaged before are open again: judge each against the code at HEAD, as the workflow describes for a push.',
+      );
     if (kinds.has('answers'))
       parts.push(
         'All decisions are made. Call get_pr: implement accepted proposals and instructions, write the replies for rejected and replied items, use my answers to continue with the open items.',

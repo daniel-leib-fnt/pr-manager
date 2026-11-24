@@ -2,7 +2,15 @@ import { existsSync, readFileSync, statSync } from 'node:fs';
 import { type IncomingMessage, type ServerResponse, createServer } from 'node:http';
 import { extname, join, normalize } from 'node:path';
 import { getSessionMessages } from '@anthropic-ai/claude-agent-sdk';
-import { type ReviewInput, type SubmitInput, addInstruction, enqueueReReview, submitDecisions, submitReview } from './actions.ts';
+import {
+  type ReviewInput,
+  type SubmitInput,
+  addInstruction,
+  enqueueReReview,
+  recheckAfterPush,
+  submitDecisions,
+  submitReview,
+} from './actions.ts';
 import { batchStatus, buildGreen, runnable } from './batch.ts';
 import { config } from './config.ts';
 import type { Db, Pr } from './db.ts';
@@ -116,8 +124,8 @@ export function createHttp({ db, poller, runner }: { db: Db; poller: Poller; run
       await submitReview(db, pr, await readJson<ReviewInput>(req));
     },
     'POST followup-review': async (_q, _r, pr) => {
-      if (pr.role !== 'review') throw new Error('Only a PR I review can be reviewed again.');
-      enqueueReReview(db, pr);
+      if (pr.role === 'review') enqueueReReview(db, pr);
+      else if (!recheckAfterPush(db, pr)) throw new Error('No open proposal or question to check again.');
       runner.wake();
     },
     'POST pause': async (_q, _r, pr) => {

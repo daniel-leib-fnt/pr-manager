@@ -34,7 +34,7 @@ type BatchStatus = 'none' | 'open' | 'closable';
 export function batchStatus(comments: Comment[], questions: Question[], work: WorkItem[]): BatchStatus {
   const open =
     comments.some((c) => OPEN_STATES.has(c.state)) ||
-    questions.some((q) => q.state !== 'sent') ||
+    questions.some((q) => q.state === 'open' || q.state === 'answered') ||
     work.some((w) => w.kind !== 'close_batch' && (w.state === 'queued' || w.state === 'in_progress'));
   if (open) return 'open';
   return comments.some((c) => PENDING_STATES.has(c.state)) ? 'closable' : 'none';

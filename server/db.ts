@@ -101,8 +101,11 @@ export interface Question {
   comment_id: number | null;
   question: string;
   options: string | null;
+  /** My answer; on a withdrawn question, the agent's reason. */
   answer: string | null;
-  state: 'open' | 'answered' | 'sent';
+  // open: waits for my answer; answered: the next run takes the answer to the agent; sent: the agent has it;
+  // withdrawn: the agent took it back because a push settled it.
+  state: 'open' | 'answered' | 'sent' | 'withdrawn';
   created_at: string;
 }
 

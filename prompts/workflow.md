@@ -8,7 +8,7 @@ Report results only through the `mcp__pr__*` tools. Prose in your final message 
 
 - `get_pr` gives you the PR, the open items with their `commentId`, and my answers.
 - `set_summary` keeps the dashboard summary current: what the PR changes and why, 3 to 6 sentences.
-- `mark_fixed`, `reply`, `dismiss`, `propose` and `ask` settle comments on my own PRs.
+- `mark_fixed`, `reply`, `dismiss`, `propose`, `ask` and `withdraw_question` settle comments on my own PRs.
 - `add_review_finding`, `set_review_verdict` and `draft_thread_reply` build a review draft on PRs I review.
 - `report_blocked` stops work on the PR until I intervene.
 
@@ -61,6 +61,13 @@ Decided items, by me or by your pre-decision, carry the decision in `state`; `ac
 - **Reply:** change no code. Call `reply` with the answer or the clarifying question. The thread stays open.
 
 When an item carries `myReply`, I wrote the reply myself and the daemon posts it as is; still pass a short reply of your own, it is ignored.
+
+**After a push from outside pr-manager**, for example when I fixed something by hand, items you triaged before come back with state `new`, and `openQuestions` lists what you asked and I have not answered. Judge each against the code at HEAD instead of repeating your earlier proposal:
+
+- The push settles the item: case 6, "Already done", naming the commit. The reply you write after the decision then says what changed, so the reviewer gets an answer although I did not reply myself.
+- The push settles it in part: `propose` only what remains, and say what is done.
+- Nothing changed for it: `propose` as before.
+- A question the push settles: `withdraw_question` with the reason, then triage the item it belongs to.
 
 **Merge conflict items** (kind `conflict`): the PR does not rebase cleanly onto its base. Rebase onto the base ref named in the item with `git rebase`. Resolve conflicts that are mechanical, such as imports, neighboring edits or both sides adding entries, and keep the intent of both sides. Run the checks for the files you touched, then `mark_fixed` with an empty reply. The daemon pushes the rebased branch with the batch. If resolving a conflict needs a decision about behavior, run `git rebase --abort` and `propose` with what conflicts and the resolution you suggest.
 

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { addConflict, applyPredecisions, draftThreadReply, enqueueReReview, submitDecisions } from '../server/actions.ts';
+import { addConflict, applyPredecisions, draftThreadReply, enqueueReReview, recheckAfterPush, submitDecisions } from '../server/actions.ts';
 import { openDb } from '../server/db.ts';
 
 test('one open conflict per PR from the poll, a new one for every failed rebase at batch close', () => {
@@ -105,4 +105,51 @@ test('reviewing again is a full review until I submitted one, then a follow-up',
       ['followup_review', null],
     ],
   );
+});
+
+test('a push from outside sends open proposals of remarks back to triage', () => {
+  const db = openDb(':memory:');
+  const id = db.insert('prs', {
+    url: 'u',
+    repo: 'o/r',
+    number: 1,
+    title: 't',
+    author: 'me',
+    role: 'own',
+    head_ref: 'h',
+    head_sha: 'a1',
+    base_ref: 'main',
+  });
+  assert.equal(recheckAfterPush(db, db.pr(id)!), false, 'nothing open, nothing to check');
+  const add = (kind: string, state: string) =>
+    db.insert('comments', { pr_id: id, kind, gh_key: `${kind}:${state}`, body: 'b', state, proposal: 'p', decision: 'accept' });
+  const thread = add('thread', 'proposal');
+  const ci = add('ci', 'proposal');
+  const fixed = add('thread', 'fixed');
+  assert.equal(recheckAfterPush(db, db.pr(id)!), true);
+  assert.deepEqual([db.comment(thread)!.state, db.comment(thread)!.decision], ['new', null]);
+  assert.equal(db.comment(ci)!.state, 'proposal', 'a CI proposal belongs to its head');
+  assert.equal(db.comment(fixed)!.state, 'fixed');
+  assert.deepEqual(
+    db.workItems(id).map((w) => [w.kind, w.payload]),
+    [['comments', '{"pushed":true}']],
+  );
+});
+
+test('a push from outside makes the agent look at its open questions again', () => {
+  const db = openDb(':memory:');
+  const id = db.insert('prs', {
+    url: 'u',
+    repo: 'o/r',
+    number: 1,
+    title: 't',
+    author: 'me',
+    role: 'own',
+    head_ref: 'h',
+    head_sha: 'a1',
+    base_ref: 'main',
+  });
+  db.insert('questions', { pr_id: id, question: 'q' });
+  assert.equal(recheckAfterPush(db, db.pr(id)!), true);
+  assert.equal(db.workItems(id).length, 1);
 });

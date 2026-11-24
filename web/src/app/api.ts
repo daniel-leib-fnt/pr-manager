@@ -79,7 +79,7 @@ export interface Question {
   question: string;
   options: string | null;
   answer: string | null;
-  state: 'open' | 'answered' | 'sent';
+  state: 'open' | 'answered' | 'sent' | 'withdrawn';
 }
 
 export interface Finding {
