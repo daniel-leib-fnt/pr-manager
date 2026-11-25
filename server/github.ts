@@ -325,6 +325,23 @@ export function unansweredThreads(d: Pick<GhPrDetail, 'reviewThreads'>, me: stri
     });
 }
 
+/**
+ * The part of a GitHub Actions job log that explains a failure: the step that ended in the first error, from
+ * its `##[group]Run` line on, of which at most the last `lines` lines. The end of the whole log is mostly
+ * cleanup of later steps, which buries findings such as a linter's. A log without an error keeps its end.
+ */
+export function failedStepLog(log: string, lines: number): string {
+  const all = log.split('\n');
+  const error = all.findIndex((l) => l.includes('##[error]'));
+  if (error < 0) return all.slice(-lines).join('\n');
+  const start = Math.max(
+    0,
+    all.findLastIndex((l, i) => i < error && l.includes('##[group]Run ')),
+  );
+  const step = all.slice(start, error + 1);
+  return (step.length > lines ? [step[0], '[…]', ...step.slice(-(lines - 2))] : step).join('\n');
+}
+
 /** Link to where a review finding points: the diff line, the file line outside the diff, or the thread. */
 export function findingUrl(pr: Pick<ReviewPr, 'url' | 'repo' | 'head_sha' | 'review_draft_sha'>, f: Finding): string | null {
   if (f.kind === 'thread_reply') return f.reply_to_db_id ? `${pr.url}#discussion_r${f.reply_to_db_id}` : null;
