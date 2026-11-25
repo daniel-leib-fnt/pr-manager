@@ -3,6 +3,9 @@ import type { Db } from '../db.ts';
 import type { GhPr } from '../github.ts';
 import type { FindingView, Group, Pr, PrFields, PrState, ReviewThreadView, RoleName, RoleSummary, WorkItem, WorkKind } from '../model.ts';
 
+/** What decides whether queued work may run; `review_without_build` is null on my own PRs. */
+export type RunGate = Pick<Pr, 'check_state'> & { review_without_build?: number | null };
+
 /** One run of the working session on a PR. */
 export interface Run<P extends Pr = Pr> {
   db: Db;
@@ -67,8 +70,8 @@ export interface Role<P extends Pr = Pr, S = unknown> {
   // --- Run ---
   /** Brings the worktree to the PR head. Throws `Blocked` when that needs me. */
   syncWorktree(db: Db, pr: P, path: string): Promise<void>;
-  /** Whether queued work of this kind may run now. */
-  runnable(pr: Pick<P, 'check_state'>, kind: WorkKind): boolean;
+  /** Whether queued work of this kind may run now. Gets the columns the runner selects (`Candidate`). */
+  runnable(pr: RunGate, kind: WorkKind): boolean;
   /**
    * Queued work the role runs without the working session, such as a push. Returns the items left for the
    * working session; none when the role used up the turn.

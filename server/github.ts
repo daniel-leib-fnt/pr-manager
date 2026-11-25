@@ -121,7 +121,7 @@ export function readyToMerge(pr: GhPr): boolean | null {
   return MERGEABLE.has(pr.mergeStateStatus);
 }
 
-export type BuildState = 'SUCCESS' | 'PENDING' | 'FAILURE';
+export type BuildState = 'SUCCESS' | 'PENDING' | 'FAILURE' | 'NONE';
 
 const PASSED = new Set(['SUCCESS', 'SKIPPED', 'NEUTRAL']);
 const FAILED = new Set(['FAILURE', 'TIMED_OUT', 'STARTUP_FAILURE', 'ACTION_REQUIRED', 'ERROR']);
@@ -151,12 +151,16 @@ export interface BuildRules {
  * - FAILURE: a check failed and every check that is not ignored is complete.
  * - SUCCESS: every check that is not ignored passed (success, skipped or neutral), and at least
  *   `minSuccessful` of them succeeded, so that skipped bot checks alone are no build.
- * - PENDING: anything else, including no checks yet, too few successful ones, and cancelled or stale checks.
+ * - NONE: no build ran: no check apart from ignored ones, or only skipped and neutral ones. Right after a
+ *   push this is the normal state; when it lasts, no build is coming.
+ * - PENDING: anything else, including too few successful checks, and cancelled or stale ones.
  */
 export function buildState(pr: GhPr, rules: BuildRules): BuildState {
   const relevant = checks(pr).filter((c) => !rules.ignored.includes(c.name ?? c.context ?? ''));
-  if (!relevant.length || !relevant.every(isComplete)) return 'PENDING';
+  if (!relevant.length) return failedChecks(pr).length ? 'FAILURE' : 'NONE';
+  if (!relevant.every(isComplete)) return 'PENDING';
   if (failedChecks(pr).length) return 'FAILURE';
+  if (relevant.every((c) => outcome(c) === 'SKIPPED' || outcome(c) === 'NEUTRAL')) return 'NONE';
   const succeeded = relevant.filter((c) => outcome(c) === 'SUCCESS').length;
   return relevant.every((c) => PASSED.has(outcome(c) ?? '')) && succeeded >= rules.minSuccessful ? 'SUCCESS' : 'PENDING';
 }

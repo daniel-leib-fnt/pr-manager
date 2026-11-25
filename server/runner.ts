@@ -65,7 +65,12 @@ export function fileWriteAllowed(tool: string, input: Record<string, unknown>, w
   return posix.split('/')[0] !== '.git' && !PROTECTED.test(posix);
 }
 
-type Candidate = Pick<WorkItem, 'id' | 'pr_id' | 'kind'> & { check_state: string | null; repo: string; role: RoleName };
+type Candidate = Pick<WorkItem, 'id' | 'pr_id' | 'kind'> & {
+  check_state: string | null;
+  review_without_build?: number | null;
+  repo: string;
+  role: RoleName;
+};
 
 /** The PR whose queued work runs next: highest priority first, never a PR that already runs. */
 export function selectNext(rows: Candidate[], running: Set<number>): number | undefined {
@@ -114,7 +119,7 @@ export function createRunner({ db }: { db: Db }) {
 
   function nextPr(): Pr | undefined {
     const rows = db.all<Candidate>(
-      `SELECT w.id, w.pr_id, w.kind, p.check_state, p.repo, p.role FROM work_items w JOIN prs p ON p.id = w.pr_id
+      `SELECT w.id, w.pr_id, w.kind, p.check_state, p.review_without_build, p.repo, p.role FROM work_items w JOIN pr_view p ON p.id = w.pr_id
        WHERE w.state = 'queued' AND p.state = 'open' AND p.paused = 0 AND p.ignored = 0 AND p.blocked IS NULL`,
     );
     const id = selectNext(rows, new Set(running.keys()));

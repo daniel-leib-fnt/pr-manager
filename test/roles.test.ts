@@ -248,3 +248,26 @@ test('a thread I skipped keeps my own PR with me until it is answered or resolve
   );
   assert.equal(groupOf(db, ownPr()), 'waiting');
 });
+
+test('a review whose build never comes waits for me, until I start it without one', async () => {
+  const { db, reviewPr } = setup();
+  const hourAgo = new Date(Date.now() - 60 * 60_000).toISOString();
+  db.updatePr(reviewPr().id, { check_state: 'NONE', head_seen_at: new Date().toISOString() });
+  assert.equal(groupOf(db, reviewPr()), 'waiting', 'right after a push, no build yet is normal');
+  assert.equal(review.summary(db, reviewPr()).waitingForBuild, true);
+  db.updatePr(reviewPr().id, { head_seen_at: hourAgo });
+  assert.equal(groupOf(db, reviewPr()), 'needs_me');
+  assert.deepEqual([review.summary(db, reviewPr()).noBuild, review.summary(db, reviewPr()).waitingForBuild], [true, false]);
+  db.updatePr(reviewPr().id, { check_state: 'PENDING' });
+  assert.equal(groupOf(db, reviewPr()), 'waiting', 'a running build is worth waiting for');
+
+  db.updatePr(reviewPr().id, { check_state: 'NONE' });
+  await review.routes['POST review-without-build']({ db, pr: reviewPr(), body: {}, pollNow: async () => {} });
+  assert.equal(review.runnable(reviewPr(), 'review'), true);
+  assert.equal(groupOf(db, reviewPr()), 'queued');
+
+  // A new head may bring a build: the decision to go without one is for the old head only.
+  const gh = { headRefOid: 'b2' } as never;
+  assert.deepEqual(review.pollFields(gh, reviewPr(), true).review_without_build, 0);
+  assert.equal(review.pollFields({ headRefOid: 'a1' } as never, reviewPr(), true).head_seen_at, hourAgo);
+});

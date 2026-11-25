@@ -8,10 +8,23 @@ import { discard, prName, prUrl } from '../prs.ts';
 import { setting, workflowPrompt } from '../settings.ts';
 import { changed, errorMessage } from '../util.ts';
 import { type PreviousDraft, reviewTools } from './review-tools.ts';
-import type { Role } from './role.ts';
+import type { Role, RunGate } from './role.ts';
 
-/** Whether a review may start: a green build (see `buildState`), or waiting is switched off. */
-const buildGreen = (pr: Pick<ReviewPr, 'check_state'>) => !setting('reviewWaitForGreenBuild') || pr.check_state === 'SUCCESS';
+/** Whether a review may start: a green build (see `buildState`), waiting switched off, or I started it without a build. */
+const buildGreen = (pr: RunGate) => !setting('reviewWaitForGreenBuild') || pr.check_state === 'SUCCESS' || !!pr.review_without_build;
+
+/** How long after a push a missing build counts as one that is not coming. */
+const NO_BUILD_AFTER_MS = 30 * 60_000;
+
+/**
+ * A review held back although no build ran for its head long after the push, for example because the
+ * branch has conflicts or the PR comes from a bot whose workflows do not run. Waiting longer changes
+ * nothing, so it waits for me: start the review anyway, or ignore the PR.
+ */
+export function noBuild(pr: Pick<ReviewPr, 'check_state' | 'head_seen_at' | 'review_state' | 'is_draft'> & RunGate, now = Date.now()) {
+  if (buildGreen(pr) || pr.check_state !== 'NONE' || pr.review_state !== 'none' || pr.is_draft || !pr.head_seen_at) return false;
+  return now - Date.parse(pr.head_seen_at) >= NO_BUILD_AFTER_MS;
+}
 
 const REVIEW_KINDS = new Set<WorkKind>(['review', 'followup_review']);
 
@@ -128,7 +141,15 @@ export const review: Role<ReviewPr, ReviewRun> = {
   name: 'review',
   holdsMyWork: false,
 
-  pollFields: (_gh, _known, inReviewSearch) => ({ in_review_search: inReviewSearch ? 1 : 0 }),
+  pollFields: (gh, known, inReviewSearch) => {
+    const moved = known?.head_sha !== gh.headRefOid;
+    return {
+      in_review_search: inReviewSearch ? 1 : 0,
+      head_seen_at: moved || !known?.head_seen_at ? now() : known.head_seen_at,
+      // Starting without a build holds for the head I decided on; a new head may bring a build.
+      ...(known && moved ? { review_without_build: 0 } : {}),
+    };
+  },
 
   // A review request withdrawn or filtered out before I ever submitted a review: nothing left to do on this PR.
   // Once I reviewed it, it stays, also while a later draft is open.
@@ -256,12 +277,13 @@ export const review: Role<ReviewPr, ReviewRun> = {
     if (waiting) notify('input', `Input needed: ${prName(pr)}`, `${waiting} item(s) wait for you: ${pr.title}`, prUrl(pr));
   },
 
-  needsMe: (_db, pr) => pr.review_state === 'draft',
+  needsMe: (_db, pr) => pr.review_state === 'draft' || noBuild(pr),
 
   idleGroup: (_db, pr) => (pr.review_out_of_date ? 'out_of_date' : 'waiting'),
 
   summary: (_db, pr) => ({
-    waitingForBuild: pr.review_state !== 'submitted' && !pr.is_draft && !buildGreen(pr),
+    waitingForBuild: pr.review_state !== 'submitted' && !pr.is_draft && !buildGreen(pr) && !noBuild(pr),
+    noBuild: noBuild(pr),
     batch: 'none',
     openThreads: [],
   }),
@@ -277,6 +299,10 @@ export const review: Role<ReviewPr, ReviewRun> = {
   routes: {
     'POST review': ({ db, pr, body }) => submitReview(db, pr, body as ReviewInput),
     'POST followup-review': ({ db, pr }) => enqueueReReview(db, pr),
+    'POST review-without-build': ({ db, pr }) => {
+      db.updatePr(pr.id, { review_without_build: 1 });
+      enqueueReReview(db, db.pr(pr.id) as ReviewPr);
+    },
     'POST ignore': async ({ db, pr }) => {
       db.updatePr(pr.id, { ignored: 1 });
       changed(pr.id);

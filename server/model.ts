@@ -74,6 +74,10 @@ export interface ReviewFields {
   review_out_of_date: number;
   /** JSON `ReviewThread[]`: the threads my review draft is about, as they were when the agent last wrote to it. */
   review_threads: string | null;
+  /** When the poll first saw the current head; a build that has not started long after it is not coming. */
+  head_seen_at: string | null;
+  /** 1 when I started the review of the current head without a build; a new head resets it. */
+  review_without_build: number;
 }
 
 export type OwnPr = PrBase & OwnFields & { role: 'own' };
@@ -238,6 +242,8 @@ export interface SummaryFields {
   counts: { proposals: number; questions: number; pending: number; findings: number };
   /** A review that is held back until the build is green. */
   waitingForBuild: boolean;
+  /** A review held back although no build ran for its head long after the push: it waits for me, not for CI. */
+  noBuild: boolean;
   batch: BatchStatus;
   /**
    * Threads open on GitHub without my reply that nothing in pr-manager handles any more, for example ones I
@@ -247,7 +253,7 @@ export interface SummaryFields {
 }
 
 /** The part of the summary that each role computes. */
-export type RoleSummary = Pick<SummaryFields, 'waitingForBuild' | 'batch' | 'openThreads'>;
+export type RoleSummary = Pick<SummaryFields, 'waitingForBuild' | 'noBuild' | 'batch' | 'openThreads'>;
 
 export type OwnPrSummary = OwnPr & SummaryFields;
 export type ReviewPrSummary = Omit<ReviewPr, 'review_threads'> & SummaryFields;

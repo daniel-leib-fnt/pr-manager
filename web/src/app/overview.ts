@@ -166,6 +166,9 @@ const typing = (e: KeyboardEvent) => e.target instanceof HTMLElement && !!e.targ
                     @if (pr.blocked) {
                       <span class="tag small bad">Blocked</span>
                     }
+                    @if (pr.noBuild) {
+                      <span class="tag small bad" title="No build ran for this head; the review waits for me">No build</span>
+                    }
                     @if (veto(pr)) {
                       <span class="tag small bad" title="Decided by the agent alone; pushed when the veto window ends">Auto</span>
                     }

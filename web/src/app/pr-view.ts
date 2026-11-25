@@ -141,6 +141,7 @@ export function nextStep(pr: Pr): string {
     pr.openThreads.length ? `Answer or resolve ${plural(pr.openThreads.length, 'thread')} on GitHub` : '',
   ].filter(Boolean);
   if (todo.length) return todo.join(' · ');
+  if (pr.noBuild) return 'No build ran: review without build or ignore';
   if (pr.waitingForBuild) return 'Review waits for a green build';
   if (pr.group === 'queued') return 'Queued for the agent';
   if (pr.role === 'own' && vetoPending(pr))

@@ -27,6 +27,8 @@ const REVIEW_COLUMNS = [
   'reviewed_at',
   'review_out_of_date',
   'review_threads',
+  'head_seen_at',
+  'review_without_build',
 ] as const satisfies readonly (keyof ReviewFields)[];
 
 /** The table that holds the fields of each role, one row per PR of that role. */
@@ -92,7 +94,9 @@ CREATE TABLE IF NOT EXISTS review_prs (
   reviewed_sha TEXT,
   reviewed_at TEXT,
   review_out_of_date INTEGER NOT NULL DEFAULT 0,
-  review_threads TEXT
+  review_threads TEXT,
+  head_seen_at TEXT,
+  review_without_build INTEGER NOT NULL DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS comments (
   id INTEGER PRIMARY KEY,
@@ -183,6 +187,8 @@ const ADDED_COLUMNS: [string, string, string][] = [
   ['comments', 'by_agent', 'INTEGER NOT NULL DEFAULT 0'],
   ['prs', 'kept', 'TEXT'],
   ['own_prs', 'open_threads', 'TEXT'],
+  ['review_prs', 'head_seen_at', 'TEXT'],
+  ['review_prs', 'review_without_build', 'INTEGER NOT NULL DEFAULT 0'],
 ];
 
 /** Role columns that `prs` gained before the role tables existed; a database older than them gets them first. */
@@ -194,6 +200,8 @@ const LEGACY_PR_COLUMNS: [string, string, string][] = [
   ['prs', 'self_review_round', 'INTEGER NOT NULL DEFAULT 0'],
   ['prs', 'push_after', 'TEXT'],
   ['prs', 'open_threads', 'TEXT'],
+  ['prs', 'head_seen_at', 'TEXT'],
+  ['prs', 'review_without_build', 'INTEGER NOT NULL DEFAULT 0'],
 ];
 
 function migrate(db: DatabaseSync, path: string) {

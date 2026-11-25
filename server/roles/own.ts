@@ -312,7 +312,7 @@ export const own: Role<OwnPr, OwnRun> = {
     return pr.ready && batch === 'none' ? 'ready' : 'waiting';
   },
 
-  summary: (db, pr) => ({ waitingForBuild: false, batch: batchOf(db, pr), openThreads: openThreads(db, pr) }),
+  summary: (db, pr) => ({ waitingForBuild: false, noBuild: false, batch: batchOf(db, pr), openThreads: openThreads(db, pr) }),
 
   detail: () => ({ findings: [], threads: [] }),
 

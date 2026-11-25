@@ -152,7 +152,7 @@ export const DEFS = {
   reviewWaitForGreenBuild: def({
     group: 'Reviews',
     label: 'Wait for a green build before reviewing',
-    help: 'Running and failed checks hold the review back, and so does a PR without checks apart from ignored ones.',
+    help: 'Running and failed checks hold the review back, and so does a PR without checks apart from ignored ones; if no build has run 30 minutes after a push, the review waits for me instead.',
     type: 'boolean',
     schema: z.boolean(),
     default: true,

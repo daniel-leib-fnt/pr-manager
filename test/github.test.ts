@@ -147,11 +147,11 @@ test('the build state counts every check alike, apart from ignored ones that are
     ['a status is still pending', [build, status('Grid Build Pipeline', 'PENDING')], 'PENDING'],
     ['a check was cancelled', [build, done('test', 'CANCELLED')], 'PENDING'],
     ['a check went stale', [build, done('test', 'STALE')], 'PENDING'],
-    ['no checks at all', [], 'PENDING'],
-    ['only ignored checks, right after a push', [taskList], 'PENDING'],
+    ['no checks at all', [], 'NONE'],
+    ['only ignored checks, right after a push', [taskList], 'NONE'],
     // fntsoftware/skalos#3017: a skipped bot check is no build.
-    ['only skipped checks', [done('automerge-bot-update', 'SKIPPED'), taskList], 'PENDING'],
-    ['only neutral and skipped checks', [done('copilot', 'NEUTRAL'), done('lint', 'SKIPPED')], 'PENDING'],
+    ['only skipped checks', [done('automerge-bot-update', 'SKIPPED'), taskList], 'NONE'],
+    ['only neutral and skipped checks', [done('copilot', 'NEUTRAL'), done('lint', 'SKIPPED')], 'NONE'],
     // fntsoftware/skalos#3576: GitHub cancels the later jobs once a job failed.
     ['a check failed and later ones were cancelled', [done('build', 'FAILURE'), done('deploy', 'CANCELLED'), taskList], 'FAILURE'],
     ['a check failed', [done('build', 'FAILURE'), done('lint', 'SUCCESS')], 'FAILURE'],
@@ -168,7 +168,7 @@ test('the build state counts every check alike, apart from ignored ones that are
     'PENDING',
     'without the ignore list the task list holds the build back',
   );
-  assert.equal(buildState({ commits: { nodes: [{ commit: { oid: 'a', statusCheckRollup: null } }] } } as never, rules), 'PENDING');
+  assert.equal(buildState({ commits: { nodes: [{ commit: { oid: 'a', statusCheckRollup: null } }] } } as never, rules), 'NONE');
 });
 
 test('the build is green only after the minimum number of successful checks', () => {
