@@ -11,7 +11,7 @@ const SERVER = resolve(import.meta.dirname, '../server');
  */
 const LAYERS: { name: string; files: string[]; isolated?: boolean }[] = [
   { name: 'model: types only, shared with the web app', files: ['model.ts'] },
-  { name: 'rules: pure functions', files: ['batch.ts', 'checklist.ts'] },
+  { name: 'rules: pure functions', files: ['batch.ts', 'bot-comment.ts', 'checklist.ts'] },
   {
     name: 'infrastructure: database, settings, git, GitHub, notifications',
     files: ['config.ts', 'util.ts', 'db.ts', 'settings.ts', 'notify.ts', 'github.ts', 'git.ts', 'excerpt.ts'],

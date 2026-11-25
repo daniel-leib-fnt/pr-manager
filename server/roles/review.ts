@@ -1,3 +1,4 @@
+import { botBody } from '../bot-comment.ts';
 import { type Db, now } from '../db.ts';
 import { commentExcerpt, excerpt } from '../excerpt.ts';
 import { git, sync } from '../git.ts';
@@ -230,7 +231,7 @@ export const review: Role<ReviewPr, ReviewRun> = {
         resolved: t.isResolved,
         path: t.path,
         line: t.line ?? t.originalLine,
-        comments: t.comments.nodes.map((c) => ({ author: c.author?.login, at: c.createdAt, body: c.body })),
+        comments: t.comments.nodes.map((c) => ({ author: c.author?.login, at: c.createdAt, body: botBody(c.author?.login, c.body) })),
       })),
       instructions: ctx.db
         .comments(ctx.prId)
