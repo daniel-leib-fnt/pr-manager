@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { type AgentTool, type ToolContext, def, fail, ok } from '../agent-tools.ts';
 import { mayDecide } from '../batch.ts';
+import { botBody, botThread } from '../bot-comment.ts';
 import { hasProse } from '../checklist.ts';
 import { rest } from '../github.ts';
 import type { Confidence, Decision, OwnPr, RiskClass } from '../model.ts';
@@ -30,7 +31,7 @@ export async function describeOwn(ctx: ToolContext<OwnPr>) {
       path: c.path,
       line: c.line,
       url: c.url,
-      conversation: c.body,
+      conversation: c.kind === 'thread' ? botThread(c.body) : botBody(c.author, c.body),
       ...(c.task ? { checklistItem: c.task, checklistOnly: !hasProse(c.body) } : {}),
       ...(c.state === 'accepted' && c.proposal ? { acceptedProposal: c.proposal } : {}),
       ...(c.state === 'accepted' && c.reply_edited ? { myReply: c.reply_draft } : {}),

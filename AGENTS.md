@@ -38,7 +38,7 @@ The server is layered. A module imports only from its own layer or a lower one; 
 | Roles | `roles/` | What differs between my own PRs and the PRs I review (see below) |
 | Base | `prs.ts`, `agent-tools.ts` | What every PR has: block, pause, instruction, answers, cleanup of worktree and session; the MCP server `pr` with the tools of every PR (`get_pr`, `set_summary`, `ask`, `withdraw_question`, `follow_up`, `report_blocked`) |
 | Infrastructure | `config.ts`, `db.ts`, `settings.ts`, `git.ts`, `github.ts`, `notify.ts`, `excerpt.ts`, `util.ts` | Env config; SQLite schema, migrations, query helpers; settings (`DEFS`, precedence dashboard override > Nix file > default, prompt templating, denied tool calls); git via `execFile` (worktrees, sync, rebase, push, per-repo serialization); GraphQL/REST client; desktop notifications; event bus |
-| Rules | `batch.ts`, `checklist.ts` | Pure functions: batch open/closable, reply text, thread resolving, autonomy limits, self-review outcome, veto window; Markdown task lists. No database, no settings, no clock: callers pass the values |
+| Rules | `batch.ts`, `bot-comment.ts`, `checklist.ts` | Pure functions: batch open/closable, reply text, thread resolving, autonomy limits, self-review outcome, veto window; marking and cutting bot comments in `get_pr` (read time only, `comments.body` keeps the full text); Markdown task lists. No database, no settings, no clock: callers pass the values |
 | Model | `model.ts` | Row types, state machines and API payload types. Types only and no imports, because the web app compiles it too |
 
 ### Roles
