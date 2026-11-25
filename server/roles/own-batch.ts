@@ -143,6 +143,9 @@ async function settleTask(pr: OwnPr, c: Comment, me: string): Promise<boolean> {
   return !!text || boxChecked;
 }
 
+/** A remark on an item. A CI item keeps its `note`, which holds the failed checks as JSON for `get_pr`. */
+export const remark = (c: Pick<Comment, 'kind'>, note: string) => (c.kind === 'ci' ? {} : { note });
+
 /**
  * Continues an open batch from a head that was pushed meanwhile. Items marked fixed whose change is
  * no longer in the worktree go back to the agent, which checks whether the new head covers them.
@@ -153,7 +156,10 @@ export async function adoptBatchHead(db: Db, pr: OwnPr, sha: string, path: strin
   let reopened = false;
   if (!(await localChanged(db.pr(pr.id) as OwnPr, path))) {
     for (const c of db.comments(pr.id).filter((x) => x.state === 'fixed')) {
-      db.update('comments', c.id, { state: c.auto ? 'new' : 'accepted', note: 'The branch was pushed to meanwhile; checked again.' });
+      db.update('comments', c.id, {
+        state: c.auto ? 'new' : 'accepted',
+        ...remark(c, 'The branch was pushed to meanwhile; checked again.'),
+      });
       reopened = true;
     }
   }
@@ -175,7 +181,7 @@ export function recheckAfterPush(db: Db, pr: OwnPr): boolean {
   if (!proposals.length && !db.questions(pr.id).some((q) => q.state === 'open')) return false;
   db.transaction(() => {
     for (const c of proposals)
-      db.update('comments', c.id, { state: 'new', decision: null, note: 'The branch was pushed to meanwhile; checked again.' });
+      db.update('comments', c.id, { state: 'new', decision: null, ...remark(c, 'The branch was pushed to meanwhile; checked again.') });
     db.updatePr(pr.id, { last_event_at: now() });
     db.enqueue(pr.id, 'comments', { pushed: true });
   });

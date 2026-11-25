@@ -19,6 +19,7 @@ import {
   closeBatch,
   pushNow,
   recheckAfterPush,
+  remark,
   retrySelfReview,
   submitDecisions,
   touchBatch,
@@ -303,7 +304,7 @@ export const own: Role<OwnPr, OwnRun> = {
         db.update('comments', c.id, {
           state: 'proposal',
           decision: null,
-          note: 'The agent did not finish this item; decide again to retry.',
+          ...remark(c, 'The agent did not finish this item; decide again to retry.'),
         });
     }
     if (applyPredecisions(db, pr)) bus.emit('wake');

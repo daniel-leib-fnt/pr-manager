@@ -40,7 +40,12 @@ export async function describeOwn(ctx: ToolContext<OwnPr>) {
 }
 
 async function ciLogs(repo: string, note: string | null): Promise<{ name: string; url: string | null; log: string }[]> {
-  const checks = note ? (JSON.parse(note) as { id: number | null; name: string; url: string | null }[]) : [];
+  let checks: { id: number | null; name: string; url: string | null }[] = [];
+  try {
+    if (note) checks = JSON.parse(note);
+  } catch {
+    // Older rows had the JSON replaced by a remark; the body of the item still names the checks.
+  }
   return Promise.all(
     checks.map(async (c) => {
       if (!c.id) return { name: c.name, url: c.url, log: '(no log available, see the URL)' };
