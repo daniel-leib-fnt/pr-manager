@@ -13,6 +13,7 @@ A local daemon with a dashboard for my GitHub pull requests: the ones I authored
   - When GitHub reports merge conflicts, the agent rebases onto the base branch and resolves mechanical conflicts; the batch then pushes the result. A conflict that needs a decision becomes a proposal.
   - As soon as GitHub allows merging a PR by the repository's own rules, and nothing is open in pr-manager, it moves to the top section "Ready to merge". If it loses that state, for example through a new review or a failed required check, the daemon reads it again right away.
   - GitHub, not pr-manager's own bookkeeping, decides whether a thread still waits for me: a thread that is not resolved and whose last comment is someone else's keeps the PR in "Needs me" once pr-manager handles none of its items any more, for example after a Skip or after the agent dismissed it. The PR page links these threads; answering or resolving them on GitHub clears them on the next poll.
+  - A PR in "Waiting on others" shows since when it waits: its last activity on GitHub, or my last follow-up. When a PR of mine that is ready for review has had no activity for `waitingNudgeDays` active days (default 3), it moves to "Needs me" with a "Follow up" tag; after I nudge the reviewers, "Followed up" restarts the wait.
   - A batch pushed while the agent held commits is no dead end: the agent rebases its commits onto the pushed head like a merge conflict, and the PR is blocked only when that fails twice at the same commits.
 - **Deciding on its own (opt-in):** with `autonomy` switched on, the agent decides more than small changes, and every push is reviewed first. Switched off, which is the default, nothing of this applies.
   - Every proposal that changes code carries a risk class (`local`: the small-change rubric; `contained`: a change of behavior inside the topic of the PR; `structural`: public API, schema, build, dependencies, security, files outside the topic), a confidence (high, medium, low) and a reason, all shown on the proposal. The daemon, not the agent, turns them into a decision: `local` is always the agent's, `contained` and `structural` from the confidence I set for each, and by default never.
@@ -64,7 +65,7 @@ Settings come in two kinds:
   - Scope: the three search queries, excluded repositories.
   - Build: ignored checks, minimum successful checks, globally and per repository.
   - Reviews: wait for a green build, automatic follow-up, review guidelines.
-  - My PRs: the small-change rubric, CI fix attempts, batch quiet time, thread resolving, reply header, auto-removal of merged worktrees.
+  - My PRs: the small-change rubric, CI fix attempts, batch quiet time, the follow-up threshold, thread resolving, reply header, auto-removal of merged worktrees.
   - Autonomy: the opt-in switch, the confidence from which the agent decides contained and structural changes, the veto window, additional guidance appended to the risk classes, the prompt and the model of the self-review.
   - Agent: allowed tools, parallel sessions, model, turn and budget limits.
   - Notifications: which events notify.

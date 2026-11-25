@@ -3,7 +3,17 @@ import { Component, TemplateRef, computed, input, output, signal, viewChild } fr
 import { FormsModule } from '@angular/forms';
 import type { Comment, OwnPrSummary, Question, SelfReview } from './api';
 import { CodeExcerpt } from './code-excerpt';
-import { type Action, type ActionRequest, type Decision, type Draft, type RoleRegions, plural, pushTime, vetoPending } from './pr-view';
+import {
+  type Action,
+  type ActionRequest,
+  type Decision,
+  type Draft,
+  type RoleRegions,
+  age,
+  plural,
+  pushTime,
+  vetoPending,
+} from './pr-view';
 
 const ACTIONS: { value: Action; label: string; help: string }[] = [
   { value: 'accept', label: 'Accept', help: 'The agent implements the proposal; the thread is resolved.' },
@@ -87,6 +97,13 @@ interface Entry {
     </ng-template>
 
     <ng-template #bannersLate>
+      @if (pr().nudge && pr().waitingSince) {
+        <div class="banner">
+          <strong>No activity for {{ age(pr().waitingSince!) }}.</strong>
+          Follow up with the reviewers, then mark it here.
+          <button class="small" (click)="action.emit({ name: 'nudged' })">Followed up</button>
+        </div>
+      }
       @if (pr().openThreads.length) {
         <div class="banner">
           <strong>{{ plural(pr().openThreads.length, 'thread') }} open on GitHub without my reply.</strong>
@@ -363,6 +380,7 @@ export class OwnPr implements RoleRegions {
 
   protected readonly actions = ACTIONS;
   protected readonly plural = plural;
+  protected readonly age = age;
   protected readonly pushTime = pushTime;
   protected readonly veto = vetoPending;
   /** The review the open batch got before its push, if one ran. */

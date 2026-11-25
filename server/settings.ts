@@ -205,6 +205,14 @@ export const DEFS = {
     schema: z.number().int().min(0).max(120),
     default: 2,
   }),
+  waitingNudgeDays: def({
+    group: 'My PRs',
+    label: 'Follow up after (active days)',
+    help: 'A PR of mine that waits on others without any activity on GitHub for this many active days (see "Polling") moves to "Needs me", so that I nudge the reviewers. Drafts are left out. 0 switches it off.',
+    type: 'number',
+    schema: z.number().int().min(0).max(60),
+    default: 3,
+  }),
   resolveThreads: def({
     group: 'My PRs',
     label: 'Resolve threads after replying',

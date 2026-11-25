@@ -139,3 +139,17 @@ export function addActiveMinutes(start: Date, minutes: number, active: { days: n
     t = new Date(t.getFullYear(), t.getMonth(), t.getDate() + 1);
   }
 }
+
+/**
+ * Active days that began after `start` and up to `end`, in local time: Monday 10:00 to Thursday 09:00 is three
+ * days when every day is active, Friday to Monday one on weekdays only. Without active days every day counts.
+ */
+export function activeDaysBetween(start: Date, end: Date, days: number[]): number {
+  let count = 0;
+  const t = new Date(start.getFullYear(), start.getMonth(), start.getDate() + 1);
+  while (t <= end) {
+    if (!days.length || days.includes(t.getDay())) count++;
+    t.setDate(t.getDate() + 1);
+  }
+  return count;
+}

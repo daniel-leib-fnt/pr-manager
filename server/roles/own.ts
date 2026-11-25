@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { def, fail, ok } from '../agent-tools.ts';
-import { batchAutonomy, batchStatus, reviewOutcome } from '../batch.ts';
+import { activeDaysBetween, batchAutonomy, batchStatus, reviewOutcome } from '../batch.ts';
 import { type Db, now } from '../db.ts';
 import { Blocked, Diverged, git, sync } from '../git.ts';
 import { readyToMerge } from '../github.ts';
@@ -146,6 +146,24 @@ async function close(db: Db, pr: OwnPr, item: WorkItem) {
 }
 
 const batchOf = (db: Db, pr: OwnPr) => batchStatus(db.comments(pr.id), db.questions(pr.id), db.workItems(pr.id));
+
+/** Since when my PR waits on others: its last activity on GitHub, or my last follow-up, whichever is later. */
+const waitingSince = (pr: OwnPr) =>
+  [pr.gh_updated_at, pr.nudged_at]
+    .filter((t): t is string => !!t)
+    .sort()
+    .at(-1) ?? null;
+
+/**
+ * Whether my PR has waited on others for so long that I should nudge the reviewers. Only a PR that is ready
+ * for review counts; a draft asks nobody yet.
+ */
+export function nudgeDue(pr: OwnPr, now = new Date()): boolean {
+  const days = setting('waitingNudgeDays');
+  const since = waitingSince(pr);
+  if (!days || !since || pr.is_draft) return false;
+  return activeDaysBetween(new Date(since), now, setting('pollDays')) >= days;
+}
 
 /** Comment states in which pr-manager still works on an item: its thread is not mine to answer yet. */
 const HANDLING = new Set(['new', 'proposal', 'accepted', 'fixed', 'skipped']);
@@ -309,10 +327,18 @@ export const own: Role<OwnPr, OwnRun> = {
     // Fixes waiting out the quiet time or being pushed right now: the push is up next, not someone else.
     if (batch === 'closable') return 'push';
     if (openThreads(db, pr).length) return 'needs_me';
-    return pr.ready && batch === 'none' ? 'ready' : 'waiting';
+    if (pr.ready && batch === 'none') return 'ready';
+    return nudgeDue(pr) ? 'needs_me' : 'waiting';
   },
 
-  summary: (db, pr) => ({ waitingForBuild: false, noBuild: false, batch: batchOf(db, pr), openThreads: openThreads(db, pr) }),
+  summary: (db, pr) => ({
+    waitingForBuild: false,
+    noBuild: false,
+    batch: batchOf(db, pr),
+    openThreads: openThreads(db, pr),
+    waitingSince: waitingSince(pr),
+    nudge: nudgeDue(pr) && batchOf(db, pr) === 'none' && !pr.ready,
+  }),
 
   detail: () => ({ findings: [], threads: [] }),
 
@@ -323,5 +349,9 @@ export const own: Role<OwnPr, OwnRun> = {
     },
     'POST push-now': ({ db, pr }) => pushNow(db, pr),
     'POST retry-review': ({ db, pr }) => retrySelfReview(db, pr),
+    'POST nudged': ({ db, pr }) => {
+      db.updatePr(pr.id, { nudged_at: now() });
+      changed(pr.id);
+    },
   },
 };

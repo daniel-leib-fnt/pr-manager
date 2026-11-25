@@ -59,6 +59,8 @@ export interface OwnFields {
   push_after: string | null;
   /** JSON `OpenThread[]`: review threads open on GitHub without my reply, as of the last ingest; null before the first. */
   open_threads: string | null;
+  /** When I last followed up on a PR that waited too long; the wait counts from here or the last GitHub activity. */
+  nudged_at: string | null;
 }
 
 /** What only a PR I review has: the review draft and what I submitted. Table `review_prs`. */
@@ -263,10 +265,14 @@ export interface SummaryFields {
    * skipped. They keep the PR with me until they are answered or resolved on GitHub.
    */
   openThreads: OpenThread[];
+  /** Since when the PR waits on others: its last activity on GitHub, or my last follow-up. */
+  waitingSince: string | null;
+  /** My PR waited on others too long (setting `waitingNudgeDays`): I follow up with the reviewers. */
+  nudge: boolean;
 }
 
 /** The part of the summary that each role computes. */
-export type RoleSummary = Pick<SummaryFields, 'waitingForBuild' | 'noBuild' | 'batch' | 'openThreads'>;
+export type RoleSummary = Pick<SummaryFields, 'waitingForBuild' | 'noBuild' | 'batch' | 'openThreads' | 'waitingSince' | 'nudge'>;
 
 export type OwnPrSummary = OwnPr & SummaryFields;
 export type ReviewPrSummary = Omit<ReviewPr, 'review_threads'> & SummaryFields;

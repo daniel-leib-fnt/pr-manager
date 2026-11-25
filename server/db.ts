@@ -15,6 +15,7 @@ const OWN_COLUMNS = [
   'self_review_round',
   'push_after',
   'open_threads',
+  'nudged_at',
 ] as const satisfies readonly (keyof OwnFields)[];
 
 const REVIEW_COLUMNS = [
@@ -83,7 +84,8 @@ CREATE TABLE IF NOT EXISTS own_prs (
   self_review_result TEXT,
   self_review_round INTEGER NOT NULL DEFAULT 0,
   push_after TEXT,
-  open_threads TEXT
+  open_threads TEXT,
+  nudged_at TEXT
 );
 CREATE TABLE IF NOT EXISTS review_prs (
   pr_id INTEGER PRIMARY KEY REFERENCES prs(id) ON DELETE CASCADE,
@@ -196,6 +198,7 @@ const ADDED_COLUMNS: [string, string, string][] = [
   ['comments', 'by_agent', 'INTEGER NOT NULL DEFAULT 0'],
   ['prs', 'kept', 'TEXT'],
   ['own_prs', 'open_threads', 'TEXT'],
+  ['own_prs', 'nudged_at', 'TEXT'],
   ['review_prs', 'head_seen_at', 'TEXT'],
   ['review_prs', 'review_without_build', 'INTEGER NOT NULL DEFAULT 0'],
 ];
@@ -209,6 +212,7 @@ const LEGACY_PR_COLUMNS: [string, string, string][] = [
   ['prs', 'self_review_round', 'INTEGER NOT NULL DEFAULT 0'],
   ['prs', 'push_after', 'TEXT'],
   ['prs', 'open_threads', 'TEXT'],
+  ['prs', 'nudged_at', 'TEXT'],
   ['prs', 'head_seen_at', 'TEXT'],
   ['prs', 'review_without_build', 'INTEGER NOT NULL DEFAULT 0'],
 ];

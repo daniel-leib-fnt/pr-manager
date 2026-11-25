@@ -307,3 +307,23 @@ test('a follow-up the agent left me keeps the PR with me until I tick it off, bu
   comment(db, ownPr().id, { state: 'fixed' });
   assert.equal(groupOf(db, ownPr()), 'push');
 });
+
+test('my PR that waited on others too long comes back to me until I follow up', async () => {
+  const { db, ownPr } = setup();
+  saveOverrides({ pollDays: [0, 1, 2, 3, 4, 5, 6], waitingNudgeDays: 3 });
+  const daysAgo = (n: number) => new Date(Date.now() - n * 24 * 60 * 60_000).toISOString();
+  db.updatePr(ownPr().id, { gh_updated_at: daysAgo(1) });
+  assert.equal(groupOf(db, ownPr()), 'waiting');
+  db.updatePr(ownPr().id, { gh_updated_at: daysAgo(4) });
+  assert.equal(groupOf(db, ownPr()), 'needs_me');
+  assert.equal(own.summary(db, ownPr()).nudge, true);
+  db.updatePr(ownPr().id, { is_draft: 1 });
+  assert.equal(groupOf(db, ownPr()), 'waiting', 'a draft asks nobody yet');
+  db.updatePr(ownPr().id, { is_draft: 0 });
+  await own.routes['POST nudged']({ db, pr: ownPr(), body: {}, pollNow: async () => {} });
+  assert.equal(groupOf(db, ownPr()), 'waiting');
+  assert.equal(own.summary(db, ownPr()).waitingSince, ownPr().nudged_at);
+  saveOverrides({ waitingNudgeDays: 0 });
+  db.updatePr(ownPr().id, { nudged_at: null });
+  assert.equal(groupOf(db, ownPr()), 'waiting', '0 switches it off');
+});

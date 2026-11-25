@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
+  activeDaysBetween,
   addActiveMinutes,
   batchAutonomy,
   batchStatus,
@@ -228,4 +229,14 @@ test('with autonomy, a failed self-review and a running veto window hold the pus
     readyToClose(pr({ self_review_state: 'passed', push_after: '2026-11-24T09:00:00Z' }), 'closable', quiet(0, true), now),
     true,
   );
+});
+
+test('active days count the days that began after the start, on active days only', () => {
+  const at = (s: string) => new Date(s);
+  const all = [0, 1, 2, 3, 4, 5, 6];
+  // 2026-11-23 is a Monday.
+  assert.equal(activeDaysBetween(at('2026-11-23T10:00'), at('2026-11-23T17:00'), all), 0);
+  assert.equal(activeDaysBetween(at('2026-11-23T10:00'), at('2026-11-26T09:00'), all), 3);
+  assert.equal(activeDaysBetween(at('2026-11-27T16:00'), at('2026-11-30T08:00'), [1, 2, 3, 4, 5]), 1, 'Friday to Monday');
+  assert.equal(activeDaysBetween(at('2026-11-27T16:00'), at('2026-11-30T08:00'), []), 3, 'without active days every day counts');
 });
