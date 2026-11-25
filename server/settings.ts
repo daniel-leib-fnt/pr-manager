@@ -115,6 +115,14 @@ export const DEFS = {
     schema: z.string().min(1),
     default: 'is:pr is:open archived:false review-requested:@me',
   }),
+  reviewedQuery: def({
+    group: 'Scope',
+    label: 'Search query for PRs I reviewed',
+    help: 'Finds PRs I reviewed directly on GitHub, so that answers to my review still reach me after the request is gone.',
+    type: 'string',
+    schema: z.string().min(1),
+    default: 'is:pr is:open archived:false reviewed-by:@me -author:@me',
+  }),
   excludedRepos: def({
     group: 'Scope',
     label: 'Excluded repositories',
@@ -152,7 +160,7 @@ export const DEFS = {
   reviewWaitForGreenBuild: def({
     group: 'Reviews',
     label: 'Wait for a green build before reviewing',
-    help: 'Running and failed checks hold the review back, and so does a PR without checks apart from ignored ones.',
+    help: 'Running and failed checks hold the review back, and so does a PR without checks apart from ignored ones; if no build has run 30 minutes after a push, the review waits for me instead.',
     type: 'boolean',
     schema: z.boolean(),
     default: true,
@@ -196,6 +204,14 @@ export const DEFS = {
     type: 'number',
     schema: z.number().int().min(0).max(120),
     default: 2,
+  }),
+  waitingNudgeDays: def({
+    group: 'My PRs',
+    label: 'Follow up after (active days)',
+    help: 'A PR of mine that waits on others without any activity on GitHub for this many active days (see "Polling") moves to "Needs me", so that I nudge the reviewers. Drafts are left out. 0 switches it off.',
+    type: 'number',
+    schema: z.number().int().min(0).max(60),
+    default: 3,
   }),
   resolveThreads: def({
     group: 'My PRs',

@@ -118,6 +118,18 @@ export function pushTime(iso: string): string {
     : `on ${at.toLocaleDateString([], { weekday: 'short' })} at ${time}`;
 }
 
+/** "today", "1 day", "5 days": how long ago a time was, in calendar days. */
+export function age(iso: string): string {
+  const start = new Date(iso);
+  const days = Math.round(
+    (new Date().setHours(0, 0, 0, 0) - new Date(start.getFullYear(), start.getMonth(), start.getDate()).getTime()) / 86_400_000,
+  );
+  return days <= 0 ? 'today' : plural(days, 'day');
+}
+
+/** How long a PR in "Waiting on others" has waited, appended to its next step. */
+const waited = (pr: Pr, text: string) => (pr.group === 'waiting' && pr.waitingSince ? `${text} · since ${age(pr.waitingSince)}` : text);
+
 /** One line on what happens next with a PR, shown under its title in the list. */
 export function nextStep(pr: Pr): string {
   if (pr.state !== 'open') return pr.kept ? `Worktree kept: ${pr.kept}` : pr.state === 'merged' ? 'Merged' : 'Closed';
@@ -138,8 +150,11 @@ export function nextStep(pr: Pr): string {
     pr.counts.proposals ? `Decide ${plural(pr.counts.proposals, 'proposal')}` : '',
     pr.counts.questions ? `Answer ${plural(pr.counts.questions, 'question')}` : '',
     pr.role === 'review' && pr.review_state === 'draft' ? `Submit review · ${plural(pr.counts.findings, 'finding')}` : '',
+    pr.openThreads.length ? `Answer or resolve ${plural(pr.openThreads.length, 'thread')} on GitHub` : '',
+    pr.counts.followUps ? `Check ${plural(pr.counts.followUps, 'follow-up')}` : '',
   ].filter(Boolean);
   if (todo.length) return todo.join(' · ');
+  if (pr.noBuild) return 'No build ran: review without build or ignore';
   if (pr.waitingForBuild) return 'Review waits for a green build';
   if (pr.group === 'queued') return 'Queued for the agent';
   if (pr.role === 'own' && vetoPending(pr))
@@ -147,6 +162,8 @@ export function nextStep(pr: Pr): string {
   if (pr.group === 'push') return `Push of ${plural(pr.counts.pending, 'change')} up next`;
   if (pr.group === 'ready') return 'Ready to merge';
   if (pr.group === 'out_of_date') return 'Review out of date';
-  if (pr.role === 'review') return pr.review_state === 'submitted' ? 'Review submitted · waiting on the author' : 'Waiting for the review';
-  return pr.is_draft ? 'Draft' : 'Waiting for review';
+  if (pr.nudge && pr.waitingSince) return `No activity for ${age(pr.waitingSince)}: follow up with the reviewers`;
+  if (pr.role === 'review')
+    return waited(pr, pr.review_state === 'submitted' ? 'Review submitted · waiting on the author' : 'Waiting for the review');
+  return waited(pr, pr.is_draft ? 'Draft' : 'Waiting for review');
 }

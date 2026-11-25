@@ -57,6 +57,10 @@ export interface OwnFields {
   self_review_round: number;
   /** End of the veto window: a reviewed batch the agent decided alone is pushed only after this time. */
   push_after: string | null;
+  /** JSON `OpenThread[]`: review threads open on GitHub without my reply, as of the last ingest; null before the first. */
+  open_threads: string | null;
+  /** When I last followed up on a PR that waited too long; the wait counts from here or the last GitHub activity. */
+  nudged_at: string | null;
 }
 
 /** What only a PR I review has: the review draft and what I submitted. Table `review_prs`. */
@@ -72,6 +76,10 @@ export interface ReviewFields {
   review_out_of_date: number;
   /** JSON `ReviewThread[]`: the threads my review draft is about, as they were when the agent last wrote to it. */
   review_threads: string | null;
+  /** When the poll first saw the current head; a build that has not started long after it is not coming. */
+  head_seen_at: string | null;
+  /** 1 when I started the review of the current head without a build; a new head resets it. */
+  review_without_build: number;
 }
 
 export type OwnPr = PrBase & OwnFields & { role: 'own' };
@@ -152,6 +160,19 @@ export interface Question {
   created_at: string;
 }
 
+/**
+ * Something the agent could not do or check and leaves to me, such as an assumption it did not verify or a
+ * step outside the repository. It holds nothing back; open: waits for me to tick it off; done: I did.
+ */
+export interface FollowUp {
+  id: number;
+  pr_id: number;
+  comment_id: number | null;
+  text: string;
+  state: 'open' | 'done';
+  created_at: string;
+}
+
 export interface Finding {
   id: number;
   pr_id: number;
@@ -209,6 +230,14 @@ export interface ReviewThread {
   comments: { author: string; at: string; body: string }[];
 }
 
+/** A review thread on one of my PRs that is not resolved and whose last comment is not mine. */
+export interface OpenThread {
+  threadId: string;
+  path: string;
+  author: string | null;
+  url: string | null;
+}
+
 // --- HTTP API ---------------------------------------------------------------------------------
 
 /** A few lines of the file a comment or finding points to, read from the PR's worktree. */
@@ -225,11 +254,25 @@ export type Group = 'ready' | 'needs_me' | 'working' | 'queued' | 'push' | 'out_
 export interface SummaryFields {
   group: Group;
   running: boolean;
-  counts: { proposals: number; questions: number; pending: number; findings: number };
+  counts: { proposals: number; questions: number; pending: number; findings: number; followUps: number };
   /** A review that is held back until the build is green. */
   waitingForBuild: boolean;
+  /** A review held back although no build ran for its head long after the push: it waits for me, not for CI. */
+  noBuild: boolean;
   batch: BatchStatus;
+  /**
+   * Threads open on GitHub without my reply that nothing in pr-manager handles any more, for example ones I
+   * skipped. They keep the PR with me until they are answered or resolved on GitHub.
+   */
+  openThreads: OpenThread[];
+  /** Since when the PR waits on others: its last activity on GitHub, or my last follow-up. */
+  waitingSince: string | null;
+  /** My PR waited on others too long (setting `waitingNudgeDays`): I follow up with the reviewers. */
+  nudge: boolean;
 }
+
+/** The part of the summary that each role computes. */
+export type RoleSummary = Pick<SummaryFields, 'waitingForBuild' | 'noBuild' | 'batch' | 'openThreads' | 'waitingSince' | 'nudge'>;
 
 export type OwnPrSummary = OwnPr & SummaryFields;
 export type ReviewPrSummary = Omit<ReviewPr, 'review_threads'> & SummaryFields;
@@ -243,6 +286,7 @@ export interface PrDetail {
   pr: PrSummary;
   comments: CommentView[];
   questions: Question[];
+  followUps: FollowUp[];
   findings: FindingView[];
   threads: ReviewThreadView[];
   work: WorkItem[];

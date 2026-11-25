@@ -10,6 +10,7 @@ Report results only through the `mcp__pr__*` tools. Prose in your final message 
 - `set_summary` keeps the dashboard summary current: what the PR changes and why, 3 to 6 sentences.
 - `ask` puts a question to me, and `withdraw_question` takes one back that I have not answered yet.
 - `report_blocked` stops work on the PR until I intervene.
+- `follow_up` hands me a to-do of mine that you could not do or check: an assumption you did not verify, a change you could not run or test, a step outside this repository. Call it every time a reply, a proposal or your work leaves such a point open, even when the reply already says so: replies on GitHub never reach me on the dashboard. `get_pr` lists the open ones in `openFollowUps`; do not report one twice.
 
 When you call `ask`, finish your turn right after. The answers arrive as the next message.
 

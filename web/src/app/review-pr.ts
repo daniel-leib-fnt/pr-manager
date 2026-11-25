@@ -36,6 +36,13 @@ const VERDICTS = [
     </ng-template>
 
     <ng-template #bannersLate>
+      @if (pr().noBuild) {
+        <div class="banner">
+          <strong>No build.</strong>
+          No check apart from skipped or ignored ones ran for this head, long after the push. Waiting longer will not help.
+          <button class="small" (click)="action.emit({ name: 'review-without-build' })">Review without build</button>
+        </div>
+      }
       @if (pr().review_out_of_date) {
         <div class="banner">The review is out of date: new commits or replies since my review.</div>
       }

@@ -1,7 +1,10 @@
 import type { AgentTool, ToolContext } from '../agent-tools.ts';
 import type { Db } from '../db.ts';
 import type { GhPr } from '../github.ts';
-import type { BatchStatus, FindingView, Group, Pr, PrFields, PrState, ReviewThreadView, RoleName, WorkItem, WorkKind } from '../model.ts';
+import type { FindingView, Group, Pr, PrFields, PrState, ReviewThreadView, RoleName, RoleSummary, WorkItem, WorkKind } from '../model.ts';
+
+/** What decides whether queued work may run; `review_without_build` is null on my own PRs. */
+export type RunGate = Pick<Pr, 'check_state'> & { review_without_build?: number | null };
 
 /** One run of the working session on a PR. */
 export interface Run<P extends Pr = Pr> {
@@ -57,6 +60,11 @@ export interface Role<P extends Pr = Pr, S = unknown> {
   pollFields(gh: GhPr, known: P | undefined, inReviewSearch: boolean): Partial<PrFields>;
   /** A PR seen for the first time. */
   created?(db: Db, pr: P): void;
+  /**
+   * Before the state is decided: takes over what I did on GitHub outside pr-manager, such as a review I
+   * submitted there. `inReviewSearch` is false for a PR that only a lookup or another search found.
+   */
+  reconcile?(ctx: { db: Db; pr: P; gh: GhPr; me: string; inReviewSearch: boolean }): Promise<void>;
   /** The state the PR gets, given GitHub's. */
   pollState?(state: PrState, known: P, inReviewSearch: boolean): PrState;
   /** An open PR after its row was updated: turns what happened on GitHub into work. */
@@ -67,8 +75,8 @@ export interface Role<P extends Pr = Pr, S = unknown> {
   // --- Run ---
   /** Brings the worktree to the PR head. Throws `Blocked` when that needs me. */
   syncWorktree(db: Db, pr: P, path: string): Promise<void>;
-  /** Whether queued work of this kind may run now. */
-  runnable(pr: Pick<P, 'check_state'>, kind: WorkKind): boolean;
+  /** Whether queued work of this kind may run now. Gets the columns the runner selects (`Candidate`). */
+  runnable(pr: RunGate, kind: WorkKind): boolean;
   /**
    * Queued work the role runs without the working session, such as a push. Returns the items left for the
    * working session; none when the role used up the turn.
@@ -92,7 +100,7 @@ export interface Role<P extends Pr = Pr, S = unknown> {
   needsMe(db: Db, pr: P): boolean;
   /** The group of a PR that neither waits for me nor has runnable work. */
   idleGroup(db: Db, pr: P): Group;
-  summary(db: Db, pr: P): { waitingForBuild: boolean; batch: BatchStatus };
+  summary(db: Db, pr: P): RoleSummary;
   detail(db: Db, pr: P): { findings: FindingView[]; threads: ReviewThreadView[] };
   /** Actions of this role, keyed like `POST submit`; they win over the common ones of the same key. */
   routes: Record<string, Route<P>>;

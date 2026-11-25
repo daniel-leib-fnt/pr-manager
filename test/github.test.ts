@@ -1,7 +1,16 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { createHash } from 'node:crypto';
-import { type GhPr, buildState, commentableLines, draftThreads, failedChecks, findingUrl, readyToMerge } from '../server/github.ts';
+import {
+  type GhPr,
+  buildState,
+  commentableLines,
+  draftThreads,
+  failedChecks,
+  findingUrl,
+  readyToMerge,
+  unansweredThreads,
+} from '../server/github.ts';
 
 test('commentable lines follow the right side of each hunk', () => {
   const patch = ['@@ -1,3 +1,4 @@', ' a', '-b', '+B', '+C', ' d', '@@ -10,2 +11,2 @@', ' x', '-y', '+Y'].join('\n');
@@ -41,6 +50,53 @@ test('the threads of a draft are my unresolved ones and those it replies to', ()
     ],
   );
   assert.deepEqual(threads[0].comments, [{ author: 'me', at: 't', body: 'b' }]);
+});
+
+test('a thread waits for me on GitHub while it is open and someone else wrote last', () => {
+  const thread = (id: string, isResolved: boolean, comments: [string, string][]) => ({
+    id,
+    isResolved,
+    path: 'a.kt',
+    line: 3,
+    originalLine: 3,
+    comments: {
+      nodes: comments.map(([login, body], i) => ({
+        id: `${id}${i}`,
+        databaseId: i,
+        author: { login },
+        body,
+        createdAt: 't',
+        url: `u/${id}${i}`,
+        diffHunk: 'h',
+      })),
+    },
+  });
+  const d = {
+    reviewThreads: {
+      nodes: [
+        thread('open', false, [['bob', 'rename']]),
+        thread('answered', false, [
+          ['bob', 'rename'],
+          ['me', 'done'],
+        ]),
+        thread('again', false, [
+          ['bob', 'rename'],
+          ['me', 'done'],
+          ['bob', 'not quite'],
+        ]),
+        thread('resolved', true, [['bob', 'rename']]),
+        thread('checked', false, [['bob', '- [x] add a test']]),
+        thread('unchecked', false, [['bob', '- [ ] add a test']]),
+        thread('checked with a question', false, [['bob', 'Why?\n- [x] add a test']]),
+      ],
+    },
+  };
+  assert.deepEqual(unansweredThreads(d, 'me'), [
+    { threadId: 'open', path: 'a.kt', author: 'bob', url: 'u/open0' },
+    { threadId: 'again', path: 'a.kt', author: 'bob', url: 'u/again2' },
+    { threadId: 'unchecked', path: 'a.kt', author: 'bob', url: 'u/unchecked0' },
+    { threadId: 'checked with a question', path: 'a.kt', author: 'bob', url: 'u/checked with a question0' },
+  ]);
 });
 
 test('finding links point to the diff line, the file line, or the thread', () => {
@@ -91,11 +147,11 @@ test('the build state counts every check alike, apart from ignored ones that are
     ['a status is still pending', [build, status('Grid Build Pipeline', 'PENDING')], 'PENDING'],
     ['a check was cancelled', [build, done('test', 'CANCELLED')], 'PENDING'],
     ['a check went stale', [build, done('test', 'STALE')], 'PENDING'],
-    ['no checks at all', [], 'PENDING'],
-    ['only ignored checks, right after a push', [taskList], 'PENDING'],
+    ['no checks at all', [], 'NONE'],
+    ['only ignored checks, right after a push', [taskList], 'NONE'],
     // fntsoftware/skalos#3017: a skipped bot check is no build.
-    ['only skipped checks', [done('automerge-bot-update', 'SKIPPED'), taskList], 'PENDING'],
-    ['only neutral and skipped checks', [done('copilot', 'NEUTRAL'), done('lint', 'SKIPPED')], 'PENDING'],
+    ['only skipped checks', [done('automerge-bot-update', 'SKIPPED'), taskList], 'NONE'],
+    ['only neutral and skipped checks', [done('copilot', 'NEUTRAL'), done('lint', 'SKIPPED')], 'NONE'],
     // fntsoftware/skalos#3576: GitHub cancels the later jobs once a job failed.
     ['a check failed and later ones were cancelled', [done('build', 'FAILURE'), done('deploy', 'CANCELLED'), taskList], 'FAILURE'],
     ['a check failed', [done('build', 'FAILURE'), done('lint', 'SUCCESS')], 'FAILURE'],
@@ -112,7 +168,7 @@ test('the build state counts every check alike, apart from ignored ones that are
     'PENDING',
     'without the ignore list the task list holds the build back',
   );
-  assert.equal(buildState({ commits: { nodes: [{ commit: { oid: 'a', statusCheckRollup: null } }] } } as never, rules), 'PENDING');
+  assert.equal(buildState({ commits: { nodes: [{ commit: { oid: 'a', statusCheckRollup: null } }] } } as never, rules), 'NONE');
 });
 
 test('the build is green only after the minimum number of successful checks', () => {

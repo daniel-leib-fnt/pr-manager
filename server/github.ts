@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
-import type { Finding, ReviewPr, ReviewThread } from './model.ts';
+import { hasProse, parseTasks } from './checklist.ts';
+import type { Finding, OpenThread, ReviewPr, ReviewThread } from './model.ts';
 import { run } from './util.ts';
 
 export class GithubError extends Error {
@@ -120,7 +121,7 @@ export function readyToMerge(pr: GhPr): boolean | null {
   return MERGEABLE.has(pr.mergeStateStatus);
 }
 
-export type BuildState = 'SUCCESS' | 'PENDING' | 'FAILURE';
+export type BuildState = 'SUCCESS' | 'PENDING' | 'FAILURE' | 'NONE';
 
 const PASSED = new Set(['SUCCESS', 'SKIPPED', 'NEUTRAL']);
 const FAILED = new Set(['FAILURE', 'TIMED_OUT', 'STARTUP_FAILURE', 'ACTION_REQUIRED', 'ERROR']);
@@ -150,12 +151,16 @@ export interface BuildRules {
  * - FAILURE: a check failed and every check that is not ignored is complete.
  * - SUCCESS: every check that is not ignored passed (success, skipped or neutral), and at least
  *   `minSuccessful` of them succeeded, so that skipped bot checks alone are no build.
- * - PENDING: anything else, including no checks yet, too few successful ones, and cancelled or stale checks.
+ * - NONE: no build ran: no check apart from ignored ones, or only skipped and neutral ones. Right after a
+ *   push this is the normal state; when it lasts, no build is coming.
+ * - PENDING: anything else, including too few successful checks, and cancelled or stale ones.
  */
 export function buildState(pr: GhPr, rules: BuildRules): BuildState {
   const relevant = checks(pr).filter((c) => !rules.ignored.includes(c.name ?? c.context ?? ''));
-  if (!relevant.length || !relevant.every(isComplete)) return 'PENDING';
+  if (!relevant.length) return failedChecks(pr).length ? 'FAILURE' : 'NONE';
+  if (!relevant.every(isComplete)) return 'PENDING';
   if (failedChecks(pr).length) return 'FAILURE';
+  if (relevant.every((c) => outcome(c) === 'SKIPPED' || outcome(c) === 'NEUTRAL')) return 'NONE';
   const succeeded = relevant.filter((c) => outcome(c) === 'SUCCESS').length;
   return relevant.every((c) => PASSED.has(outcome(c) ?? '')) && succeeded >= rules.minSuccessful ? 'SUCCESS' : 'PENDING';
 }
@@ -296,6 +301,28 @@ export function draftThreads(d: Pick<GhPrDetail, 'reviewThreads'>, me: string, r
       url: t.comments.nodes[0]?.url ?? null,
       comments: t.comments.nodes.map((c) => ({ author: c.author?.login ?? 'ghost', at: c.createdAt, body: c.body })),
     }));
+}
+
+/**
+ * Threads on one of my PRs that wait for me on GitHub: not resolved, and someone else wrote last. A checklist
+ * whose boxes are all checked and that says nothing else is settled without a reply.
+ */
+export function unansweredThreads(d: Pick<GhPrDetail, 'reviewThreads'>, me: string): OpenThread[] {
+  const checkedOff = (body: string) => {
+    const tasks = parseTasks(body);
+    return tasks.length > 0 && tasks.every((t) => t.checked) && !hasProse(body);
+  };
+  return d.reviewThreads.nodes
+    .filter((t) => {
+      const cs = t.comments.nodes;
+      if (t.isResolved || !cs.length || cs.at(-1)!.author?.login === me) return false;
+      const lastMine = cs.findLastIndex((c) => c.author?.login === me);
+      return !cs.slice(lastMine + 1).every((c) => checkedOff(c.body));
+    })
+    .map((t) => {
+      const cs = t.comments.nodes;
+      return { threadId: t.id, path: t.path, author: cs[0].author?.login ?? null, url: cs.at(-1)!.url };
+    });
 }
 
 /** Link to where a review finding points: the diff line, the file line outside the diff, or the thread. */

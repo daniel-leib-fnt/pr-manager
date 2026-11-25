@@ -4,11 +4,11 @@ import { type Db, openDb } from '../server/db.ts';
 import type { GhPrDetail } from '../server/github.ts';
 import { groupOf } from '../server/http.ts';
 import type { OwnPr, ReviewPr, WorkKind } from '../server/model.ts';
-import { submitAnswers } from '../server/prs.ts';
+import { settleFollowUp, submitAnswers } from '../server/prs.ts';
 import { instruct, roleOf, roles } from '../server/roles/index.ts';
 import { ingest } from '../server/roles/own-ingest.ts';
 import { own } from '../server/roles/own.ts';
-import { review } from '../server/roles/review.ts';
+import { lastSubmittedReview, review } from '../server/roles/review.ts';
 import { initSettings, saveOverrides } from '../server/settings.ts';
 
 const base = { repo: 'o/r', number: 1, title: 't', author: 'a', head_ref: 'h', head_sha: 'a1', base_ref: 'main' };
@@ -217,4 +217,113 @@ test('ingest turns open threads into items and opens a batch; answered and resol
   );
   assert.equal(again, 1);
   assert.equal(db.comments(ownPr().id)[0].state, 'new');
+});
+
+test('a thread I skipped keeps my own PR with me until it is answered or resolved on GitHub', async () => {
+  const { db, ownPr } = setup();
+  await ingest(db, ownPr(), 'me', detail([thread('T1', [{ id: 'c1', login: 'alice', body: 'rename this' }])]));
+  const [row] = db.comments(ownPr().id);
+  assert.equal(own.summary(db, ownPr()).openThreads.length, 0, 'pr-manager still handles the thread');
+  db.run(`DELETE FROM work_items`);
+  db.update('comments', row.id, { state: 'skipped' });
+  assert.equal(groupOf(db, ownPr()), 'push');
+  db.update('comments', row.id, { state: 'done' });
+  assert.equal(groupOf(db, ownPr()), 'needs_me');
+  assert.deepEqual(
+    own.summary(db, ownPr()).openThreads.map((t) => t.threadId),
+    ['T1'],
+  );
+
+  // Answered on GitHub: the next ingest sees my reply last, and the PR waits on others again.
+  await ingest(
+    db,
+    ownPr(),
+    'me',
+    detail([
+      thread('T1', [
+        { id: 'c1', login: 'alice', body: 'rename this' },
+        { id: 'c2', login: 'me', body: 'later' },
+      ]),
+    ]),
+  );
+  assert.equal(groupOf(db, ownPr()), 'waiting');
+});
+
+test('a review whose build never comes waits for me, until I start it without one', async () => {
+  const { db, reviewPr } = setup();
+  const hourAgo = new Date(Date.now() - 60 * 60_000).toISOString();
+  db.updatePr(reviewPr().id, { check_state: 'NONE', head_seen_at: new Date().toISOString() });
+  assert.equal(groupOf(db, reviewPr()), 'waiting', 'right after a push, no build yet is normal');
+  assert.equal(review.summary(db, reviewPr()).waitingForBuild, true);
+  db.updatePr(reviewPr().id, { head_seen_at: hourAgo });
+  assert.equal(groupOf(db, reviewPr()), 'needs_me');
+  assert.deepEqual([review.summary(db, reviewPr()).noBuild, review.summary(db, reviewPr()).waitingForBuild], [true, false]);
+  db.updatePr(reviewPr().id, { check_state: 'PENDING' });
+  assert.equal(groupOf(db, reviewPr()), 'waiting', 'a running build is worth waiting for');
+
+  db.updatePr(reviewPr().id, { check_state: 'NONE' });
+  await review.routes['POST review-without-build']({ db, pr: reviewPr(), body: {}, pollNow: async () => {} });
+  assert.equal(review.runnable(reviewPr(), 'review'), true);
+  assert.equal(groupOf(db, reviewPr()), 'queued');
+
+  // A new head may bring a build: the decision to go without one is for the old head only.
+  const gh = { headRefOid: 'b2' } as never;
+  assert.deepEqual(review.pollFields(gh, reviewPr(), true).review_without_build, 0);
+  assert.equal(review.pollFields({ headRefOid: 'a1' } as never, reviewPr(), true).head_seen_at, hourAgo);
+});
+
+test('my last review submitted on GitHub counts, pending ones and those of others do not', () => {
+  const r = (login: string, state: string, submittedAt: string | null, oid = 'c1') => ({
+    author: { login },
+    state,
+    submittedAt,
+    body: state,
+    commit: { oid },
+  });
+  const d = (...nodes: ReturnType<typeof r>[]) => ({ reviews: { nodes } }) as unknown as GhPrDetail;
+  assert.equal(lastSubmittedReview(d(r('me', 'PENDING', null), r('bob', 'APPROVED', '2026-11-02T00:00:00Z')), 'me'), null);
+  assert.deepEqual(
+    lastSubmittedReview(
+      d(
+        r('me', 'CHANGES_REQUESTED', '2026-11-03T00:00:00Z', 'c3'),
+        r('me', 'COMMENTED', '2026-11-01T00:00:00Z'),
+        r('me', 'DISMISSED', '2026-11-04T00:00:00Z', 'c4'),
+      ),
+      'me',
+    ),
+    { verdict: 'REQUEST_CHANGES', body: 'CHANGES_REQUESTED', commit: 'c3', at: '2026-11-03T00:00:00Z' },
+  );
+});
+
+test('a follow-up the agent left me keeps the PR with me until I tick it off, but never holds a push back', () => {
+  const { db, ownPr, reviewPr } = setup();
+  for (const pr of [ownPr, reviewPr]) {
+    const id = db.insert('follow_ups', { pr_id: pr().id, text: 'Check the team access in terraform-repo-config.' });
+    assert.equal(groupOf(db, pr()), 'needs_me');
+    settleFollowUp(db, pr(), id);
+    assert.equal(groupOf(db, pr()), 'waiting');
+  }
+  db.insert('follow_ups', { pr_id: ownPr().id, text: 'Untested.' });
+  comment(db, ownPr().id, { state: 'fixed' });
+  assert.equal(groupOf(db, ownPr()), 'push');
+});
+
+test('my PR that waited on others too long comes back to me until I follow up', async () => {
+  const { db, ownPr } = setup();
+  saveOverrides({ pollDays: [0, 1, 2, 3, 4, 5, 6], waitingNudgeDays: 3 });
+  const daysAgo = (n: number) => new Date(Date.now() - n * 24 * 60 * 60_000).toISOString();
+  db.updatePr(ownPr().id, { gh_updated_at: daysAgo(1) });
+  assert.equal(groupOf(db, ownPr()), 'waiting');
+  db.updatePr(ownPr().id, { gh_updated_at: daysAgo(4) });
+  assert.equal(groupOf(db, ownPr()), 'needs_me');
+  assert.equal(own.summary(db, ownPr()).nudge, true);
+  db.updatePr(ownPr().id, { is_draft: 1 });
+  assert.equal(groupOf(db, ownPr()), 'waiting', 'a draft asks nobody yet');
+  db.updatePr(ownPr().id, { is_draft: 0 });
+  await own.routes['POST nudged']({ db, pr: ownPr(), body: {}, pollNow: async () => {} });
+  assert.equal(groupOf(db, ownPr()), 'waiting');
+  assert.equal(own.summary(db, ownPr()).waitingSince, ownPr().nudged_at);
+  saveOverrides({ waitingNudgeDays: 0 });
+  db.updatePr(ownPr().id, { nudged_at: null });
+  assert.equal(groupOf(db, ownPr()), 'waiting', '0 switches it off');
 });
