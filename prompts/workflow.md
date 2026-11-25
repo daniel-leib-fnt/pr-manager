@@ -34,4 +34,3 @@ A Bash call runs only if every command in it matches one of these rules. Anythin
 - Do not prefix commands with environment variables. Use git options instead, for example `git -c core.editor=true rebase --continue`.
 - Long output is fine. Do not trim it with `grep` or `head`; read what you need from the result.
 - Write files only inside the worktree, never to `/tmp` or `.git/`.
-- If the repository has a `flake.nix` dev shell and a tool such as `pnpm` is missing, run it through `nix develop -c <command>`.

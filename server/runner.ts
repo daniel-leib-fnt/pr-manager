@@ -211,10 +211,12 @@ export function createRunner({ db }: { db: Db }) {
         ...(resume ? { resume } : { sessionId }),
         permissionMode: 'acceptEdits',
         ...(model ? { model } : {}),
-        // Tool search loads deferred MCP tools; every tool of a configured MCP server may be used.
+        // Tool search loads deferred MCP tools; every tool of a configured MCP server may be used. A skill only adds
+        // instructions; what it asks for still goes through the allowlist, so every skill of mine and of the repository may load.
         allowedTools: [
           ...setting('allowedTools'),
           'ToolSearch',
+          'Skill',
           `mcp__${AGENT_TOOL_SERVER}`,
           ...Object.keys(extra).map((name) => `mcp__${name}`),
         ],
