@@ -8,6 +8,7 @@ import {
   draftThreads,
   failedChecks,
   findingUrl,
+  failedStepLog,
   readyToMerge,
   unansweredThreads,
 } from '../server/github.ts';
@@ -193,4 +194,29 @@ test('failed checks include ignored ones and leave out the rest', () => {
   const nodes = [failed, errored, { __typename: 'CheckRun', name: 'build', status: 'COMPLETED', conclusion: 'CANCELLED' }];
   const pr = { commits: { nodes: [{ commit: { oid: 'a', statusCheckRollup: { contexts: { nodes } } } }] } } as never;
   assert.deepEqual(failedChecks(pr), [failed, errored]);
+});
+
+test('a CI log is cut to the step that failed, not to the cleanup after it', () => {
+  // Shaped like fntsoftware/skalos#3613: the detekt finding sits above 200 lines of post-job cleanup.
+  const log = [
+    '##[group]Run ./gradlew build',
+    'BUILD SUCCESSFUL',
+    'echo "::error::not an error, only a script line"',
+    '##[group]Run ./gradlew detekt',
+    '> Task :lib-plugin-sdk:detekt FAILED',
+    'e: AttributeBuilder.kt:87:7 Forbidden TODO marker [ForbiddenComment]',
+    'BUILD FAILED in 16s',
+    '##[error]Process completed with exit code 1.',
+    ...Array.from({ length: 300 }, (_, i) => `Post job cleanup ${i}`),
+  ].join('\n');
+  assert.deepEqual(failedStepLog(log, 200).split('\n'), [
+    '##[group]Run ./gradlew detekt',
+    '> Task :lib-plugin-sdk:detekt FAILED',
+    'e: AttributeBuilder.kt:87:7 Forbidden TODO marker [ForbiddenComment]',
+    'BUILD FAILED in 16s',
+    '##[error]Process completed with exit code 1.',
+  ]);
+  const long = ['##[group]Run make', ...Array.from({ length: 10 }, (_, i) => `line ${i}`), '##[error]failed'].join('\n');
+  assert.deepEqual(failedStepLog(long, 4).split('\n'), ['##[group]Run make', '[…]', 'line 9', '##[error]failed']);
+  assert.equal(failedStepLog('a\nb\nc', 2), 'b\nc', 'without an error the end of the log stays');
 });

@@ -3,7 +3,7 @@ import { type AgentTool, type ToolContext, def, fail, ok } from '../agent-tools.
 import { mayDecide } from '../batch.ts';
 import { botBody, botThread } from '../bot-comment.ts';
 import { hasProse } from '../checklist.ts';
-import { rest } from '../github.ts';
+import { failedStepLog, rest } from '../github.ts';
 import type { Confidence, Decision, OwnPr, RiskClass } from '../model.ts';
 import { autonomyLimits, setting } from '../settings.ts';
 import { errorMessage } from '../util.ts';
@@ -14,8 +14,6 @@ const DECIDED = {
   reject: 'rejected: change no code, write the reply that declines it',
   reply: 'reply: change no code, write the reply; the thread stays open',
 };
-
-const tail = (text: string, lines: number) => text.split('\n').slice(-lines).join('\n');
 
 /** The open items of my PR, as `get_pr` hands them to the agent. */
 export async function describeOwn(ctx: ToolContext<OwnPr>) {
@@ -49,7 +47,7 @@ async function ciLogs(repo: string, note: string | null): Promise<{ name: string
       try {
         // GitHub answers with a redirect to the plain-text log, which fetch follows.
         const log = await rest<string>('GET', `/repos/${repo}/actions/jobs/${c.id}/logs`);
-        return { name: c.name, url: c.url, log: tail(log, 200) };
+        return { name: c.name, url: c.url, log: failedStepLog(log, 200) };
       } catch (e) {
         return { name: c.name, url: c.url, log: `(log unavailable: ${errorMessage(e)})` };
       }
