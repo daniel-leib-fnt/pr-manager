@@ -115,6 +115,14 @@ export const DEFS = {
     schema: z.string().min(1),
     default: 'is:pr is:open archived:false review-requested:@me',
   }),
+  reviewedQuery: def({
+    group: 'Scope',
+    label: 'Search query for PRs I reviewed',
+    help: 'Finds PRs I reviewed directly on GitHub, so that answers to my review still reach me after the request is gone.',
+    type: 'string',
+    schema: z.string().min(1),
+    default: 'is:pr is:open archived:false reviewed-by:@me -author:@me',
+  }),
   excludedRepos: def({
     group: 'Scope',
     label: 'Excluded repositories',

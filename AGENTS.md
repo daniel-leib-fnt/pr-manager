@@ -74,7 +74,7 @@ A new kind of PR is a new `Role` implementation registered in `roles/index.ts`, 
 
 ## Flow
 
-1. Poller: search → upsert `prs` → `Role.polled`. For my own PRs, `ingest` adds `comments` rows (kinds in `CommentKind`) and enqueues a `work_items` row; for reviews, a `review` item is enqueued.
+1. Poller: search → upsert `prs` → `Role.reconcile` (what I did on GitHub directly, such as a review) → `Role.polled`. For my own PRs, `ingest` adds `comments` rows (kinds in `CommentKind`) and enqueues a `work_items` row; for reviews, a `review` item is enqueued.
 2. Runner: one queued kind set per PR → `preflight` (worktree, interactive session check, `Role.syncWorktree`) → `Role.runQueued` for work without the working session (push, self-review) → `query()` with the `pr` MCP server.
 3. Agent: changes code, amends, reports via MCP tools. Comment states: `new → fixed | proposal | done`, `proposal → accepted | skipped` (dashboard), `accepted → fixed`.
 4. With `autonomy`: before the push, `closeBatch` enqueues `self_review`; `selfReview` in `roles/own.ts` reviews the batch diff in a fresh read-only session (`readOnlySession` of the runner), and `pushAllowed` in `roles/own-batch.ts` lets the push through only after a passed review of exactly that HEAD and, for a batch the agent decided alone, the veto window.

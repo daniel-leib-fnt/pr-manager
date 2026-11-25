@@ -1,7 +1,7 @@
 import { type Db, now } from '../db.ts';
 import { commentExcerpt, excerpt } from '../excerpt.ts';
 import { git, sync } from '../git.ts';
-import { draftThreads, findingUrl, prDetail, resolveThread, rest, viewer } from '../github.ts';
+import { type GhPrDetail, draftThreads, findingUrl, prDetail, resolveThread, rest, viewer } from '../github.ts';
 import type { ReviewPr, ReviewThread, Verdict, WorkKind } from '../model.ts';
 import { notify } from '../notify.ts';
 import { discard, prName, prUrl } from '../prs.ts';
@@ -101,16 +101,49 @@ export async function submitReview(db: Db, pr: ReviewPr, input: ReviewInput) {
 }
 
 /** My submitted review is out of date once the head moved, or the author answered in one of my threads. */
-async function checkReviewOutOfDate(db: Db, pr: ReviewPr, me: string) {
+async function checkReviewOutOfDate(db: Db, pr: ReviewPr, me: string, detail?: GhPrDetail) {
   let outOfDate = pr.head_sha !== pr.reviewed_sha;
   if (!outOfDate && pr.reviewed_at) {
-    const d = await prDetail(pr.repo, pr.number);
+    const d = detail ?? (await prDetail(pr.repo, pr.number));
     outOfDate = d.reviewThreads.nodes.some((t) => {
       const cs = t.comments.nodes;
       return cs.some((c) => c.author?.login === me) && cs.some((c) => c.author?.login !== me && c.createdAt > pr.reviewed_at!);
     });
   }
   if (outOfDate !== !!pr.review_out_of_date) db.updatePr(pr.id, { review_out_of_date: outOfDate ? 1 : 0 });
+}
+
+const VERDICTS: Record<string, Verdict> = { APPROVED: 'APPROVE', CHANGES_REQUESTED: 'REQUEST_CHANGES', COMMENTED: 'COMMENT' };
+
+/** My last review on GitHub that counts as submitted, wherever I wrote it; null when I never submitted one. */
+export function lastSubmittedReview(d: Pick<GhPrDetail, 'reviews'>, me: string) {
+  const mine = d.reviews.nodes.filter((r) => r.author?.login === me && VERDICTS[r.state] && r.submittedAt && r.commit);
+  const last = mine.sort((a, b) => a.submittedAt!.localeCompare(b.submittedAt!)).at(-1);
+  return last ? { verdict: VERDICTS[last.state], body: last.body, commit: last.commit!.oid, at: last.submittedAt! } : null;
+}
+
+/**
+ * A review I submitted directly on GitHub becomes my submitted review here, as if I had sent it from the
+ * dashboard: the PR stays instead of being dropped when its request is gone, and answers to it show as
+ * out of date. An unsent draft of the agent is superseded.
+ */
+async function adoptReview(db: Db, pr: ReviewPr, me: string) {
+  const d = await prDetail(pr.repo, pr.number);
+  const review = lastSubmittedReview(d, me);
+  if (!review) return;
+  db.transaction(() => {
+    db.run(`UPDATE findings SET state = 'skipped' WHERE pr_id = ? AND state = 'draft'`, pr.id);
+    db.run(`UPDATE work_items SET state = 'done', finished_at = ? WHERE pr_id = ? AND kind = 'review' AND state = 'queued'`, now(), pr.id);
+    db.updatePr(pr.id, {
+      review_state: 'submitted',
+      review_verdict: review.verdict,
+      review_body: review.body,
+      reviewed_sha: review.commit,
+      reviewed_at: review.at,
+    });
+  });
+  await checkReviewOutOfDate(db, db.pr(pr.id) as ReviewPr, me, d);
+  changed(pr.id);
 }
 
 /** Keeps the threads the review draft is about, so the dashboard shows what a reply answers and which threads got none. */
@@ -149,6 +182,11 @@ export const review: Role<ReviewPr, ReviewRun> = {
       // Starting without a build holds for the head I decided on; a new head may bring a build.
       ...(known && moved ? { review_without_build: 0 } : {}),
     };
+  },
+
+  // Outside the review search, a PR without a review of mine from the dashboard may still have one from GitHub.
+  async reconcile({ db, pr, gh, me, inReviewSearch }) {
+    if (!inReviewSearch && !pr.reviewed_sha && gh.state === 'OPEN') await adoptReview(db, pr, me);
   },
 
   // A review request withdrawn or filtered out before I ever submitted a review: nothing left to do on this PR.

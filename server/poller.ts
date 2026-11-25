@@ -34,6 +34,11 @@ export function createPoller({ db }: { db: Db }) {
       if (gh.author?.login !== me && !isExcluded(gh.repository.nameWithOwner))
         seen.set(gh.url, { gh, role: 'review', inReviewSearch: true });
     }
+    // PRs I reviewed directly on GitHub, whose request is gone: answers to my review must still reach me.
+    for (const gh of await searchPrs(setting('reviewedQuery'))) {
+      if (gh.author?.login !== me && !seen.has(gh.url) && !isExcluded(gh.repository.nameWithOwner))
+        seen.set(gh.url, { gh, role: 'review', inReviewSearch: false });
+    }
     const missing = db.prsWhere(`state = 'open' OR blocked IS NOT NULL`).filter((p) => !seen.has(p.url) && !isExcluded(p.repo));
     const looked = await prsByUrl(missing.map((p) => p.url));
     for (const p of missing) {
@@ -93,6 +98,10 @@ export function createPoller({ db }: { db: Db }) {
       });
       prev = db.pr(id)!;
       role.created?.(db, prev);
+    }
+    if (role.reconcile) {
+      await role.reconcile({ db, pr: prev, gh, me, inReviewSearch });
+      prev = db.pr(prev.id)!;
     }
     const isChanged =
       prev.gh_updated_at !== gh.updatedAt ||

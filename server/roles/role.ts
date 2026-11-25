@@ -60,6 +60,11 @@ export interface Role<P extends Pr = Pr, S = unknown> {
   pollFields(gh: GhPr, known: P | undefined, inReviewSearch: boolean): Partial<PrFields>;
   /** A PR seen for the first time. */
   created?(db: Db, pr: P): void;
+  /**
+   * Before the state is decided: takes over what I did on GitHub outside pr-manager, such as a review I
+   * submitted there. `inReviewSearch` is false for a PR that only a lookup or another search found.
+   */
+  reconcile?(ctx: { db: Db; pr: P; gh: GhPr; me: string; inReviewSearch: boolean }): Promise<void>;
   /** The state the PR gets, given GitHub's. */
   pollState?(state: PrState, known: P, inReviewSearch: boolean): PrState;
   /** An open PR after its row was updated: turns what happened on GitHub into work. */

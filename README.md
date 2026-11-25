@@ -36,7 +36,7 @@ A local daemon with a dashboard for my GitHub pull requests: the ones I authored
 
 ## How it works
 
-- **Poller:** every 2 minutes, Monday to Friday, 07:00 to 18:00, it runs two GitHub searches: `author:@me` and `review-requested:@me`, the latter including team requests. Known PRs are also looked up by URL. Only changed PRs get a detail fetch, and only new activity starts an agent.
+- **Poller:** every 2 minutes, Monday to Friday, 07:00 to 18:00, it runs three GitHub searches: `author:@me`, `review-requested:@me` (including team requests) and `reviewed-by:@me`. Known PRs are also looked up by URL. The third search keeps PRs I reviewed directly on GitHub: such a review counts as my submitted review, so the PR stays after its request is gone, and new commits or answers in my threads mark the review out of date. Only changed PRs get a detail fetch, and only new activity starts an agent.
 - **Build status:** one rule for my PRs and reviews, computed from the single checks of the head commit; required and optional checks count the same. Ignored checks (default `task-list-completed`) are checks that may never finish: they do not hold the build back while they run, but count when they fail.
   - Green: every check that is not ignored passed (success, skipped or neutral), no check failed, and at least the minimum number of them succeeded (default 1, adjustable per repository), so that a skipped bot check alone, or a few quick checks right after a push, are no build. Reviews start only on a green build.
   - No build: no check apart from ignored ones ran, or only skipped and neutral ones, for example on a branch with conflicts or a bot PR whose workflows do not run. A review that still has no build 30 minutes after the push no longer waits silently: it moves to "Needs me" with a "No build" tag, and I start it with "Review without build" or ignore the PR. A new head clears that choice.
@@ -48,7 +48,7 @@ A local daemon with a dashboard for my GitHub pull requests: the ones I authored
   - A run interrupted by a restart is queued again, and the session is told to check its unfinished changes.
 - **No network for agents:** sessions get no GitHub token, no SSH agent, no credential helper and an empty gh config. Pushing, posting and resolving are daemon actions that run only when a batch closes.
 - **Tool allowlist:** the allowlist is part of the agent prompt, together with the rule that every command of a Bash call must match it, so no pipes, chains or `cd`. Denied calls appear in the transcript and on the settings page, each with a suggested allow rule.
-- **Cleanup:** merged PRs, withdrawn review requests and closed reviews have their worktree and agent session removed automatically, unless the worktree holds uncommitted or unpushed work or an interactive session. Uncommitted changes and an interactive session block the cleanup; commits that were never pushed do not: the worktree is kept, and the PR stays in "Closed" with a note until the commits are gone. My own closed PRs keep their worktree until I remove it on the dashboard.
+- **Cleanup:** merged PRs, review requests withdrawn before I reviewed, and closed reviews have their worktree and agent session removed automatically, unless the worktree holds uncommitted or unpushed work or an interactive session. Uncommitted changes and an interactive session block the cleanup; commits that were never pushed do not: the worktree is kept, and the PR stays in "Closed" with a note until the commits are gone. My own closed PRs keep their worktree until I remove it on the dashboard.
 
 Worktrees live at `~/SC/github/<org>/<repo>.worktrees/<branch-with-dash>`. Clones are created at `~/SC/github/<org>/<repo>` when missing.
 
@@ -60,7 +60,7 @@ Settings come in two kinds:
 - **Database:** the state lives in `pr-manager.db` in `stateDir`. The version that keeps the columns of my own PRs and of reviews in tables of their own migrates an older database on its first start and keeps a copy next to it as `pr-manager.db.before-role-tables`. Going back to an older version needs that copy.
 - **Behavior settings:** set defaults with `services.pr-manager.settings`, and change them at runtime on the dashboard's settings page (<http://127.0.0.1:8020/settings>). A change there overrides the Home Manager value until you press Reset.
   - Polling: interval, active days and hours.
-  - Scope: both search queries, excluded repositories.
+  - Scope: the three search queries, excluded repositories.
   - Build: ignored checks, minimum successful checks, globally and per repository.
   - Reviews: wait for a green build, automatic follow-up, review guidelines.
   - My PRs: the small-change rubric, CI fix attempts, batch quiet time, thread resolving, reply header, auto-removal of merged worktrees.

@@ -87,7 +87,7 @@ in
       description = ''
         Defaults for the behavior settings. Changes made on the dashboard's settings page override
         them until reset there. Keys: pollIntervalMinutes, pollDays (0 = Sunday), pollFromHour,
-        pollToHour, ownQuery, reviewQuery, excludedRepos, ignoredChecks, minSuccessfulChecks,
+        pollToHour, ownQuery, reviewQuery, reviewedQuery, excludedRepos, ignoredChecks, minSuccessfulChecks,
         minSuccessfulChecksPerRepo ({ "owner/repo" = 3; }), reviewWaitForGreenBuild,
         autoFollowupOnReRequest, reviewGuidelines, smallChangeRubric, maxCiAttempts,
         batchQuietMinutes, resolveThreads ("fixed_and_skipped_with_reason",

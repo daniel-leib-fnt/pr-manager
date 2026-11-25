@@ -8,7 +8,7 @@ import { submitAnswers } from '../server/prs.ts';
 import { instruct, roleOf, roles } from '../server/roles/index.ts';
 import { ingest } from '../server/roles/own-ingest.ts';
 import { own } from '../server/roles/own.ts';
-import { review } from '../server/roles/review.ts';
+import { lastSubmittedReview, review } from '../server/roles/review.ts';
 import { initSettings, saveOverrides } from '../server/settings.ts';
 
 const base = { repo: 'o/r', number: 1, title: 't', author: 'a', head_ref: 'h', head_sha: 'a1', base_ref: 'main' };
@@ -270,4 +270,27 @@ test('a review whose build never comes waits for me, until I start it without on
   const gh = { headRefOid: 'b2' } as never;
   assert.deepEqual(review.pollFields(gh, reviewPr(), true).review_without_build, 0);
   assert.equal(review.pollFields({ headRefOid: 'a1' } as never, reviewPr(), true).head_seen_at, hourAgo);
+});
+
+test('my last review submitted on GitHub counts, pending ones and those of others do not', () => {
+  const r = (login: string, state: string, submittedAt: string | null, oid = 'c1') => ({
+    author: { login },
+    state,
+    submittedAt,
+    body: state,
+    commit: { oid },
+  });
+  const d = (...nodes: ReturnType<typeof r>[]) => ({ reviews: { nodes } }) as unknown as GhPrDetail;
+  assert.equal(lastSubmittedReview(d(r('me', 'PENDING', null), r('bob', 'APPROVED', '2026-11-02T00:00:00Z')), 'me'), null);
+  assert.deepEqual(
+    lastSubmittedReview(
+      d(
+        r('me', 'CHANGES_REQUESTED', '2026-11-03T00:00:00Z', 'c3'),
+        r('me', 'COMMENTED', '2026-11-01T00:00:00Z'),
+        r('me', 'DISMISSED', '2026-11-04T00:00:00Z', 'c4'),
+      ),
+      'me',
+    ),
+    { verdict: 'REQUEST_CHANGES', body: 'CHANGES_REQUESTED', commit: 'c3', at: '2026-11-03T00:00:00Z' },
+  );
 });
