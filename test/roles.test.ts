@@ -4,7 +4,7 @@ import { type Db, openDb } from '../server/db.ts';
 import type { GhPrDetail } from '../server/github.ts';
 import { groupOf } from '../server/http.ts';
 import type { OwnPr, ReviewPr, WorkKind } from '../server/model.ts';
-import { submitAnswers } from '../server/prs.ts';
+import { settleFollowUp, submitAnswers } from '../server/prs.ts';
 import { instruct, roleOf, roles } from '../server/roles/index.ts';
 import { ingest } from '../server/roles/own-ingest.ts';
 import { own } from '../server/roles/own.ts';
@@ -293,4 +293,17 @@ test('my last review submitted on GitHub counts, pending ones and those of other
     ),
     { verdict: 'REQUEST_CHANGES', body: 'CHANGES_REQUESTED', commit: 'c3', at: '2026-11-03T00:00:00Z' },
   );
+});
+
+test('a follow-up the agent left me keeps the PR with me until I tick it off, but never holds a push back', () => {
+  const { db, ownPr, reviewPr } = setup();
+  for (const pr of [ownPr, reviewPr]) {
+    const id = db.insert('follow_ups', { pr_id: pr().id, text: 'Check the team access in terraform-repo-config.' });
+    assert.equal(groupOf(db, pr()), 'needs_me');
+    settleFollowUp(db, pr(), id);
+    assert.equal(groupOf(db, pr()), 'waiting');
+  }
+  db.insert('follow_ups', { pr_id: ownPr().id, text: 'Untested.' });
+  comment(db, ownPr().id, { state: 'fixed' });
+  assert.equal(groupOf(db, ownPr()), 'push');
 });

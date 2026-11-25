@@ -139,6 +139,7 @@ export function nextStep(pr: Pr): string {
     pr.counts.questions ? `Answer ${plural(pr.counts.questions, 'question')}` : '',
     pr.role === 'review' && pr.review_state === 'draft' ? `Submit review · ${plural(pr.counts.findings, 'finding')}` : '',
     pr.openThreads.length ? `Answer or resolve ${plural(pr.openThreads.length, 'thread')} on GitHub` : '',
+    pr.counts.followUps ? `Check ${plural(pr.counts.followUps, 'follow-up')}` : '',
   ].filter(Boolean);
   if (todo.length) return todo.join(' · ');
   if (pr.noBuild) return 'No build ran: review without build or ignore';

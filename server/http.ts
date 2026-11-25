@@ -7,7 +7,7 @@ import type { Db } from './db.ts';
 import { commentExcerpt } from './excerpt.ts';
 import type { Group, Pr, PrDetail, PrSummary } from './model.ts';
 import type { Poller } from './poller.ts';
-import { resetSession, setPaused, submitAnswers, unblock } from './prs.ts';
+import { resetSession, setPaused, settleFollowUp, submitAnswers, unblock } from './prs.ts';
 import { cleanupPr, instruct, roleOf } from './roles/index.ts';
 import type { Route } from './roles/role.ts';
 import type { Runner } from './runner.ts';
@@ -24,7 +24,9 @@ export function groupOf(db: Db, pr: Pr): Group {
   const role = roleOf(pr);
   if (role.needsMe(db, pr) || db.questions(pr.id).some((q) => q.state === 'open')) return 'needs_me';
   if (db.workItems(pr.id).some((w) => w.state === 'queued' && role.runnable(pr, w.kind))) return 'queued';
-  return role.idleGroup(db, pr);
+  const idle = role.idleGroup(db, pr);
+  // A follow-up the agent left me holds nothing back: a push that is up next still goes first.
+  return idle !== 'push' && db.followUps(pr.id).some((f) => f.state === 'open') ? 'needs_me' : idle;
 }
 
 function summary(db: Db, pr: Pr, running: boolean): PrSummary {
@@ -41,6 +43,7 @@ function summary(db: Db, pr: Pr, running: boolean): PrSummary {
       questions: db.questions(pr.id).filter((q) => q.state === 'open').length,
       pending: comments.filter((c) => c.state === 'fixed' || c.state === 'skipped').length,
       findings: db.findings(pr.id).filter((f) => f.state === 'draft').length,
+      followUps: db.followUps(pr.id).filter((f) => f.state === 'open').length,
     },
     ...roleOf(pr).summary(db, pr),
   } as PrSummary;
@@ -87,6 +90,7 @@ export function createHttp({ db, poller, runner }: { db: Db; poller: Poller; run
       pr: summary(db, pr, runner.isRunning(pr.id)),
       comments: db.comments(pr.id).map((c) => ({ ...c, excerpt: commentExcerpt(pr.worktree, c) })),
       questions: db.questions(pr.id),
+      followUps: db.followUps(pr.id),
       ...roleOf(pr).detail(db, pr),
       work: db.workItems(pr.id).slice(-30),
     }),
@@ -97,6 +101,7 @@ export function createHttp({ db, poller, runner }: { db: Db; poller: Poller; run
       if (!text) throw new Error('Empty instruction.');
       instruct(db, pr, text);
     },
+    'POST follow-up-done': ({ pr, body }) => settleFollowUp(db, pr, Number((body as { id?: number }).id)),
     'POST pause': ({ pr }) => setPaused(db, pr, true),
     'POST resume': ({ pr }) => setPaused(db, pr, false),
     'POST unblock': async ({ pr }) => {

@@ -62,6 +62,14 @@ export function addInstruction(db: Db, pr: PrBase, text: string) {
 }
 
 /** My answers to the agent's questions. Returns whether one was taken, so the agent has work. */
+/** Ticks off a follow-up the agent left me. */
+export function settleFollowUp(db: Db, pr: PrBase, id: number) {
+  const f = db.followUps(pr.id).find((x) => x.id === id);
+  if (!f) throw new Error(`Unknown follow-up ${id}.`);
+  db.update('follow_ups', id, { state: 'done' });
+  changed(pr.id);
+}
+
 export function submitAnswers(db: Db, pr: PrBase, answers: { id: number; answer: string }[] = []): boolean {
   let taken = false;
   for (const a of answers) {

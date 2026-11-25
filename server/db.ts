@@ -2,7 +2,7 @@ import { existsSync, mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { DatabaseSync, type SQLInputValue } from 'node:sqlite';
 import { config } from './config.ts';
-import type { Comment, Finding, OwnFields, Pr, PrBase, PrFields, Question, ReviewFields, WorkItem, WorkKind } from './model.ts';
+import type { Comment, Finding, FollowUp, OwnFields, Pr, PrBase, PrFields, Question, ReviewFields, WorkItem, WorkKind } from './model.ts';
 
 const OWN_COLUMNS = [
   'batch_head_sha',
@@ -40,6 +40,7 @@ interface Rows {
   questions: Question;
   findings: Finding;
   work_items: WorkItem;
+  follow_ups: FollowUp;
 }
 
 const schema = `
@@ -139,6 +140,14 @@ CREATE TABLE IF NOT EXISTS questions (
   question TEXT NOT NULL,
   options TEXT,
   answer TEXT,
+  state TEXT NOT NULL DEFAULT 'open',
+  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+);
+CREATE TABLE IF NOT EXISTS follow_ups (
+  id INTEGER PRIMARY KEY,
+  pr_id INTEGER NOT NULL REFERENCES prs(id) ON DELETE CASCADE,
+  comment_id INTEGER,
+  text TEXT NOT NULL,
   state TEXT NOT NULL DEFAULT 'open',
   created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
 );
@@ -338,6 +347,7 @@ export function openDb(path = join(config.stateDir, 'pr-manager.db')) {
     comment: (id: number) => get<Comment>('SELECT * FROM comments WHERE id = ?', id),
     questions: (prId: number) => all<Question>('SELECT * FROM questions WHERE pr_id = ? ORDER BY id', prId),
     findings: (prId: number) => all<Finding>('SELECT * FROM findings WHERE pr_id = ? ORDER BY id', prId),
+    followUps: (prId: number) => all<FollowUp>('SELECT * FROM follow_ups WHERE pr_id = ? ORDER BY id', prId),
     workItems: (prId: number) => all<WorkItem>('SELECT * FROM work_items WHERE pr_id = ? ORDER BY id', prId),
     enqueue: (prId: number, kind: WorkKind, payload?: unknown) => {
       // One queued item per kind and PR is enough; the session sees the current state anyway.

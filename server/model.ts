@@ -158,6 +158,19 @@ export interface Question {
   created_at: string;
 }
 
+/**
+ * Something the agent could not do or check and leaves to me, such as an assumption it did not verify or a
+ * step outside the repository. It holds nothing back; open: waits for me to tick it off; done: I did.
+ */
+export interface FollowUp {
+  id: number;
+  pr_id: number;
+  comment_id: number | null;
+  text: string;
+  state: 'open' | 'done';
+  created_at: string;
+}
+
 export interface Finding {
   id: number;
   pr_id: number;
@@ -239,7 +252,7 @@ export type Group = 'ready' | 'needs_me' | 'working' | 'queued' | 'push' | 'out_
 export interface SummaryFields {
   group: Group;
   running: boolean;
-  counts: { proposals: number; questions: number; pending: number; findings: number };
+  counts: { proposals: number; questions: number; pending: number; findings: number; followUps: number };
   /** A review that is held back until the build is green. */
   waitingForBuild: boolean;
   /** A review held back although no build ran for its head long after the push: it waits for me, not for CI. */
@@ -267,6 +280,7 @@ export interface PrDetail {
   pr: PrSummary;
   comments: CommentView[];
   questions: Question[];
+  followUps: FollowUp[];
   findings: FindingView[];
   threads: ReviewThreadView[];
   work: WorkItem[];

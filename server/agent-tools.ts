@@ -80,6 +80,10 @@ export function createAgentTools(
             openQuestions: questions
               .filter((q) => q.state === 'open')
               .map((q) => ({ questionId: q.id, question: q.question, commentId: q.comment_id })),
+            openFollowUps: db
+              .followUps(prId)
+              .filter((f) => f.state === 'open')
+              .map((f) => f.text),
           },
           null,
           2,
@@ -117,6 +121,18 @@ export function createAgentTools(
         if (!q || q.state !== 'open') return fail(`Question ${questionId} is not an open question of this PR.`);
         db.update('questions', questionId, { state: 'withdrawn', answer: reason });
         return touched(ok(`Question ${questionId} withdrawn.`));
+      },
+    ),
+
+    def(
+      'follow_up',
+      'Hands me something to do or check myself that you could not: an assumption you did not verify, a change you could not run or test, or a step outside this repository such as a setting in another repository or a ticket. It holds nothing back and needs no answer; I tick it off on the dashboard. Write it so that I can act on it without the transcript. Link it to a comment when it belongs to one.',
+      { text: z.string(), commentId: z.number().optional() },
+      async ({ text, commentId }) => {
+        if (commentId !== undefined && db.comment(commentId)?.pr_id !== prId) return fail(`Unknown comment ${commentId}.`);
+        if (!text.trim()) return fail('A follow-up needs a text.');
+        db.insert('follow_ups', { pr_id: prId, comment_id: commentId ?? null, text: text.trim() });
+        return touched(ok('Follow-up saved.'));
       },
     ),
 
