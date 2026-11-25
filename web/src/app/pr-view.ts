@@ -138,6 +138,7 @@ export function nextStep(pr: Pr): string {
     pr.counts.proposals ? `Decide ${plural(pr.counts.proposals, 'proposal')}` : '',
     pr.counts.questions ? `Answer ${plural(pr.counts.questions, 'question')}` : '',
     pr.role === 'review' && pr.review_state === 'draft' ? `Submit review · ${plural(pr.counts.findings, 'finding')}` : '',
+    pr.openThreads.length ? `Answer or resolve ${plural(pr.openThreads.length, 'thread')} on GitHub` : '',
   ].filter(Boolean);
   if (todo.length) return todo.join(' · ');
   if (pr.waitingForBuild) return 'Review waits for a green build';

@@ -2,7 +2,7 @@ import { type TaskSource, checkTask, hasProse } from '../checklist.ts';
 import { type Db, now } from '../db.ts';
 import { Blocked, Diverged, git, isDirty, localChanged, push, rebaseOntoBase, sync } from '../git.ts';
 import { GithubError, resolveThread, rest, viewer } from '../github.ts';
-import type { Comment, Decision, OwnPr, SelfReview } from '../model.ts';
+import type { Comment, Decision, OpenThread, OwnPr, SelfReview } from '../model.ts';
 import { clearNotification } from '../notify.ts';
 import { addActiveMinutes, batchStatus, readyToClose, replyFor, shouldResolve, vetoApplies } from '../batch.ts';
 import { block, submitAnswers } from '../prs.ts';
@@ -117,14 +117,16 @@ function sourcePath(pr: OwnPr, s: TaskSource) {
  * Settles a checklist item: a fixed line gets its box checked, which is the whole answer unless the
  * comment has prose around its checklist; a skip with a reason is a reply, and the box stays open.
  */
-async function settleTask(pr: OwnPr, c: Comment, me: string) {
+/** Returns whether GitHub now shows an answer: a reply or a checked box. */
+async function settleTask(pr: OwnPr, c: Comment, me: string): Promise<boolean> {
   const source = JSON.parse(c.task_source!) as TaskSource;
   const path = sourcePath(pr, source);
   const { body } = await rest<{ body: string }>('GET', path);
   let text = replyFor(c, me, setting('replyHeader'));
+  let boxChecked = false;
   if (c.state === 'fixed' && !c.clarify) {
     const checked = checkTask(body ?? '', c.task!);
-    let boxChecked = checked === null; // edited away or checked by someone else: nothing to check
+    boxChecked = checked === null; // edited away or checked by someone else: nothing to check
     if (checked !== null) {
       try {
         await rest(source.type === 'review' ? 'PUT' : 'PATCH', path, { body: checked });
@@ -138,6 +140,7 @@ async function settleTask(pr: OwnPr, c: Comment, me: string) {
     else if (!boxChecked) text ??= replyFor({ ...c, reply_draft: 'Done.' }, me, setting('replyHeader'));
   }
   if (text) await postReply(pr, c, text);
+  return !!text || boxChecked;
 }
 
 /**
@@ -235,15 +238,21 @@ export async function closeBatch(ctx: { db: Db; pr: OwnPr; ingest: (pr: OwnPr) =
 
   const me = await viewer();
   const all = db.comments(pr.id);
+  // Threads this batch answers or resolves; a skipped one gets neither and stays open on GitHub.
+  const answered = new Set<string>();
   for (const c of all.filter((x) => x.state === 'fixed' || x.state === 'skipped')) {
     try {
+      let posted: boolean;
       if (c.task) {
-        await settleTask(pr, c, me);
+        posted = await settleTask(pr, c, me);
       } else {
         const text = replyFor(c, me, setting('replyHeader'));
         if (text) await postReply(pr, c, text);
+        posted = !!text;
       }
-      if (shouldResolve(c, all, setting('resolveThreads'))) await resolveThread(c.thread_id!);
+      const resolved = shouldResolve(c, all, setting('resolveThreads'));
+      if (resolved) await resolveThread(c.thread_id!);
+      if (c.thread_id && (posted || resolved)) answered.add(c.thread_id);
       db.update('comments', c.id, { state: 'done' });
     } catch (e) {
       if (!gone(e)) throw e;
@@ -251,7 +260,11 @@ export async function closeBatch(ctx: { db: Db; pr: OwnPr; ingest: (pr: OwnPr) =
     }
     changed(pr.id);
   }
+  // Until the next poll reads them again, the threads this batch answered are no longer open.
+  const known = (db.pr(pr.id) as OwnPr).open_threads;
+  const open = (JSON.parse(known ?? '[]') as OpenThread[]).filter((t) => !answered.has(t.threadId));
   db.updatePr(pr.id, {
+    open_threads: known === null ? null : JSON.stringify(open),
     batch_head_sha: null,
     self_review_sha: null,
     self_review_state: null,

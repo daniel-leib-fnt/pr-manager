@@ -57,6 +57,8 @@ export interface OwnFields {
   self_review_round: number;
   /** End of the veto window: a reviewed batch the agent decided alone is pushed only after this time. */
   push_after: string | null;
+  /** JSON `OpenThread[]`: review threads open on GitHub without my reply, as of the last ingest; null before the first. */
+  open_threads: string | null;
 }
 
 /** What only a PR I review has: the review draft and what I submitted. Table `review_prs`. */
@@ -209,6 +211,14 @@ export interface ReviewThread {
   comments: { author: string; at: string; body: string }[];
 }
 
+/** A review thread on one of my PRs that is not resolved and whose last comment is not mine. */
+export interface OpenThread {
+  threadId: string;
+  path: string;
+  author: string | null;
+  url: string | null;
+}
+
 // --- HTTP API ---------------------------------------------------------------------------------
 
 /** A few lines of the file a comment or finding points to, read from the PR's worktree. */
@@ -229,7 +239,15 @@ export interface SummaryFields {
   /** A review that is held back until the build is green. */
   waitingForBuild: boolean;
   batch: BatchStatus;
+  /**
+   * Threads open on GitHub without my reply that nothing in pr-manager handles any more, for example ones I
+   * skipped. They keep the PR with me until they are answered or resolved on GitHub.
+   */
+  openThreads: OpenThread[];
 }
+
+/** The part of the summary that each role computes. */
+export type RoleSummary = Pick<SummaryFields, 'waitingForBuild' | 'batch' | 'openThreads'>;
 
 export type OwnPrSummary = OwnPr & SummaryFields;
 export type ReviewPrSummary = Omit<ReviewPr, 'review_threads'> & SummaryFields;

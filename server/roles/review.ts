@@ -263,6 +263,7 @@ export const review: Role<ReviewPr, ReviewRun> = {
   summary: (_db, pr) => ({
     waitingForBuild: pr.review_state !== 'submitted' && !pr.is_draft && !buildGreen(pr),
     batch: 'none',
+    openThreads: [],
   }),
 
   detail(db, pr) {

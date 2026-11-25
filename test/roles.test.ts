@@ -218,3 +218,33 @@ test('ingest turns open threads into items and opens a batch; answered and resol
   assert.equal(again, 1);
   assert.equal(db.comments(ownPr().id)[0].state, 'new');
 });
+
+test('a thread I skipped keeps my own PR with me until it is answered or resolved on GitHub', async () => {
+  const { db, ownPr } = setup();
+  await ingest(db, ownPr(), 'me', detail([thread('T1', [{ id: 'c1', login: 'alice', body: 'rename this' }])]));
+  const [row] = db.comments(ownPr().id);
+  assert.equal(own.summary(db, ownPr()).openThreads.length, 0, 'pr-manager still handles the thread');
+  db.run(`DELETE FROM work_items`);
+  db.update('comments', row.id, { state: 'skipped' });
+  assert.equal(groupOf(db, ownPr()), 'push');
+  db.update('comments', row.id, { state: 'done' });
+  assert.equal(groupOf(db, ownPr()), 'needs_me');
+  assert.deepEqual(
+    own.summary(db, ownPr()).openThreads.map((t) => t.threadId),
+    ['T1'],
+  );
+
+  // Answered on GitHub: the next ingest sees my reply last, and the PR waits on others again.
+  await ingest(
+    db,
+    ownPr(),
+    'me',
+    detail([
+      thread('T1', [
+        { id: 'c1', login: 'alice', body: 'rename this' },
+        { id: 'c2', login: 'me', body: 'later' },
+      ]),
+    ]),
+  );
+  assert.equal(groupOf(db, ownPr()), 'waiting');
+});

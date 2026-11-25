@@ -1,7 +1,16 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { createHash } from 'node:crypto';
-import { type GhPr, buildState, commentableLines, draftThreads, failedChecks, findingUrl, readyToMerge } from '../server/github.ts';
+import {
+  type GhPr,
+  buildState,
+  commentableLines,
+  draftThreads,
+  failedChecks,
+  findingUrl,
+  readyToMerge,
+  unansweredThreads,
+} from '../server/github.ts';
 
 test('commentable lines follow the right side of each hunk', () => {
   const patch = ['@@ -1,3 +1,4 @@', ' a', '-b', '+B', '+C', ' d', '@@ -10,2 +11,2 @@', ' x', '-y', '+Y'].join('\n');
@@ -41,6 +50,53 @@ test('the threads of a draft are my unresolved ones and those it replies to', ()
     ],
   );
   assert.deepEqual(threads[0].comments, [{ author: 'me', at: 't', body: 'b' }]);
+});
+
+test('a thread waits for me on GitHub while it is open and someone else wrote last', () => {
+  const thread = (id: string, isResolved: boolean, comments: [string, string][]) => ({
+    id,
+    isResolved,
+    path: 'a.kt',
+    line: 3,
+    originalLine: 3,
+    comments: {
+      nodes: comments.map(([login, body], i) => ({
+        id: `${id}${i}`,
+        databaseId: i,
+        author: { login },
+        body,
+        createdAt: 't',
+        url: `u/${id}${i}`,
+        diffHunk: 'h',
+      })),
+    },
+  });
+  const d = {
+    reviewThreads: {
+      nodes: [
+        thread('open', false, [['bob', 'rename']]),
+        thread('answered', false, [
+          ['bob', 'rename'],
+          ['me', 'done'],
+        ]),
+        thread('again', false, [
+          ['bob', 'rename'],
+          ['me', 'done'],
+          ['bob', 'not quite'],
+        ]),
+        thread('resolved', true, [['bob', 'rename']]),
+        thread('checked', false, [['bob', '- [x] add a test']]),
+        thread('unchecked', false, [['bob', '- [ ] add a test']]),
+        thread('checked with a question', false, [['bob', 'Why?\n- [x] add a test']]),
+      ],
+    },
+  };
+  assert.deepEqual(unansweredThreads(d, 'me'), [
+    { threadId: 'open', path: 'a.kt', author: 'bob', url: 'u/open0' },
+    { threadId: 'again', path: 'a.kt', author: 'bob', url: 'u/again2' },
+    { threadId: 'unchecked', path: 'a.kt', author: 'bob', url: 'u/unchecked0' },
+    { threadId: 'checked with a question', path: 'a.kt', author: 'bob', url: 'u/checked with a question0' },
+  ]);
 });
 
 test('finding links point to the diff line, the file line, or the thread', () => {

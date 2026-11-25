@@ -9,7 +9,11 @@ const ACTIONS: { value: Action; label: string; help: string }[] = [
   { value: 'accept', label: 'Accept', help: 'The agent implements the proposal; the thread is resolved.' },
   { value: 'reject', label: 'Reject', help: 'No code change; a reply declines it and the thread is resolved.' },
   { value: 'reply', label: 'Reply', help: 'No code change; a reply only, the thread stays open.' },
-  { value: 'skip', label: 'Skip', help: 'Nothing is posted and nothing is resolved.' },
+  {
+    value: 'skip',
+    label: 'Skip',
+    help: 'Nothing is posted and nothing is resolved. A skipped thread keeps the PR with me until it is answered or resolved on GitHub.',
+  },
 ];
 const LABEL: Record<Action, string> = { accept: 'Accept', reject: 'Reject', reply: 'Reply', skip: 'Skip' };
 const TAG_CLASS: Record<Action, string> = { accept: 'ok', reject: 'warn', reply: 'info', skip: '' };
@@ -78,6 +82,18 @@ interface Entry {
           >
             Push anyway
           </button>
+        </div>
+      }
+    </ng-template>
+
+    <ng-template #bannersLate>
+      @if (pr().openThreads.length) {
+        <div class="banner">
+          <strong>{{ plural(pr().openThreads.length, 'thread') }} open on GitHub without my reply.</strong>
+          pr-manager no longer handles them; answer or resolve them on GitHub:
+          @for (t of pr().openThreads; track t.threadId) {
+            <a [href]="t.url" target="_blank" rel="noopener">{{ t.path }} ({{ t.author ?? 'ghost' }}) ↗</a>
+          }
         </div>
       }
     </ng-template>
@@ -340,6 +356,7 @@ export class OwnPr implements RoleRegions {
 
   readonly tags = viewChild<TemplateRef<unknown>>('tags');
   readonly bannersEarly = viewChild<TemplateRef<unknown>>('bannersEarly');
+  readonly bannersLate = viewChild<TemplateRef<unknown>>('bannersLate');
   readonly tabLabel = viewChild<TemplateRef<unknown>>('tabLabel');
   readonly main = viewChild<TemplateRef<unknown>>('main');
   readonly side = viewChild<TemplateRef<unknown>>('side');

@@ -14,6 +14,7 @@ const OWN_COLUMNS = [
   'self_review_result',
   'self_review_round',
   'push_after',
+  'open_threads',
 ] as const satisfies readonly (keyof OwnFields)[];
 
 const REVIEW_COLUMNS = [
@@ -78,7 +79,8 @@ CREATE TABLE IF NOT EXISTS own_prs (
   self_review_state TEXT,
   self_review_result TEXT,
   self_review_round INTEGER NOT NULL DEFAULT 0,
-  push_after TEXT
+  push_after TEXT,
+  open_threads TEXT
 );
 CREATE TABLE IF NOT EXISTS review_prs (
   pr_id INTEGER PRIMARY KEY REFERENCES prs(id) ON DELETE CASCADE,
@@ -180,6 +182,7 @@ const ADDED_COLUMNS: [string, string, string][] = [
   ['comments', 'reason', 'TEXT'],
   ['comments', 'by_agent', 'INTEGER NOT NULL DEFAULT 0'],
   ['prs', 'kept', 'TEXT'],
+  ['own_prs', 'open_threads', 'TEXT'],
 ];
 
 /** Role columns that `prs` gained before the role tables existed; a database older than them gets them first. */
@@ -190,6 +193,7 @@ const LEGACY_PR_COLUMNS: [string, string, string][] = [
   ['prs', 'self_review_result', 'TEXT'],
   ['prs', 'self_review_round', 'INTEGER NOT NULL DEFAULT 0'],
   ['prs', 'push_after', 'TEXT'],
+  ['prs', 'open_threads', 'TEXT'],
 ];
 
 function migrate(db: DatabaseSync, path: string) {

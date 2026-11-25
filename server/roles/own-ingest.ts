@@ -1,6 +1,6 @@
 import { hasTasks, parseTasks, taskKeys, type TaskSource } from '../checklist.ts';
 import type { Db } from '../db.ts';
-import { type GhComment, type GhPrDetail, buildState, failedChecks, prDetail, viewer } from '../github.ts';
+import { type GhComment, type GhPrDetail, buildState, failedChecks, prDetail, unansweredThreads, viewer } from '../github.ts';
 import type { Comment, OwnPr } from '../model.ts';
 import { buildRules } from '../settings.ts';
 import { openBatch } from './own-batch.ts';
@@ -158,6 +158,7 @@ export async function ingest(db: Db, pr: OwnPr, me?: string, detail?: GhPrDetail
   }
 
   db.kvSet(`ingested:${pr.id}`, '1');
+  db.updatePr(pr.id, { open_threads: JSON.stringify(unansweredThreads(d, me)) });
   if (added) openBatch(db, pr.id, d.headRefOid);
   return added;
 }

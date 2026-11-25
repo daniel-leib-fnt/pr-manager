@@ -4,7 +4,7 @@ import { batchAutonomy, batchStatus, reviewOutcome } from '../batch.ts';
 import { type Db, now } from '../db.ts';
 import { Blocked, Diverged, git, sync } from '../git.ts';
 import { readyToMerge } from '../github.ts';
-import type { Comment, OwnPr, SelfReviewResult, WorkItem } from '../model.ts';
+import type { Comment, OpenThread, OwnPr, SelfReviewResult, WorkItem } from '../model.ts';
 import { notify } from '../notify.ts';
 import { prName, prUrl } from '../prs.ts';
 import { autonomyLimits, selfReviewPrompt, setting, workflowPrompt } from '../settings.ts';
@@ -147,6 +147,24 @@ async function close(db: Db, pr: OwnPr, item: WorkItem) {
 
 const batchOf = (db: Db, pr: OwnPr) => batchStatus(db.comments(pr.id), db.questions(pr.id), db.workItems(pr.id));
 
+/** Comment states in which pr-manager still works on an item: its thread is not mine to answer yet. */
+const HANDLING = new Set(['new', 'proposal', 'accepted', 'fixed', 'skipped']);
+
+/**
+ * Threads that wait for me on GitHub although pr-manager handles none of their items any more, such as a
+ * thread I skipped or one the agent dismissed. GitHub decides, not the comment state: they stay until they
+ * are answered or resolved there.
+ */
+export function openThreads(db: Db, pr: OwnPr): OpenThread[] {
+  const handled = new Set(
+    db
+      .comments(pr.id)
+      .filter((c) => c.thread_id && HANDLING.has(c.state))
+      .map((c) => c.thread_id),
+  );
+  return (JSON.parse(pr.open_threads ?? '[]') as OpenThread[]).filter((t) => !handled.has(t.threadId));
+}
+
 /** What one run carries: the comments that were open when it started. */
 interface OwnRun {
   openAtStart: Set<number>;
@@ -171,7 +189,8 @@ export const own: Role<OwnPr, OwnRun> = {
     // A failed build that has no CI item yet, for example because ingest failed, is ingested again on every poll.
     const ciUnseen = pr.check_state === 'FAILURE' && !db.comments(pr.id).some((c) => c.gh_key === `ci:${gh.headRefOid}`);
     // Losing the ready state means something changed on GitHub: look at the PR again, even if its update time did not move.
-    if (isChanged || lostReady || ciUnseen) await ingest(db, pr, me);
+    // A PR whose open threads were never read is read once, too.
+    if (isChanged || lostReady || ciUnseen || pr.open_threads === null) await ingest(db, pr, me);
     // The daemon records the head it pushes itself, so a head that moved here was pushed by someone else.
     if (prev.head_sha !== gh.headRefOid) recheckAfterPush(db, pr);
     // A moving base does not change the PR's update time, so conflicts are checked on every poll.
@@ -289,10 +308,11 @@ export const own: Role<OwnPr, OwnRun> = {
     const batch = batchOf(db, pr);
     // Fixes waiting out the quiet time or being pushed right now: the push is up next, not someone else.
     if (batch === 'closable') return 'push';
+    if (openThreads(db, pr).length) return 'needs_me';
     return pr.ready && batch === 'none' ? 'ready' : 'waiting';
   },
 
-  summary: (db, pr) => ({ waitingForBuild: false, batch: batchOf(db, pr) }),
+  summary: (db, pr) => ({ waitingForBuild: false, batch: batchOf(db, pr), openThreads: openThreads(db, pr) }),
 
   detail: () => ({ findings: [], threads: [] }),
 

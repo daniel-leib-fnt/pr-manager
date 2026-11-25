@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
-import type { Finding, ReviewPr, ReviewThread } from './model.ts';
+import { hasProse, parseTasks } from './checklist.ts';
+import type { Finding, OpenThread, ReviewPr, ReviewThread } from './model.ts';
 import { run } from './util.ts';
 
 export class GithubError extends Error {
@@ -296,6 +297,28 @@ export function draftThreads(d: Pick<GhPrDetail, 'reviewThreads'>, me: string, r
       url: t.comments.nodes[0]?.url ?? null,
       comments: t.comments.nodes.map((c) => ({ author: c.author?.login ?? 'ghost', at: c.createdAt, body: c.body })),
     }));
+}
+
+/**
+ * Threads on one of my PRs that wait for me on GitHub: not resolved, and someone else wrote last. A checklist
+ * whose boxes are all checked and that says nothing else is settled without a reply.
+ */
+export function unansweredThreads(d: Pick<GhPrDetail, 'reviewThreads'>, me: string): OpenThread[] {
+  const checkedOff = (body: string) => {
+    const tasks = parseTasks(body);
+    return tasks.length > 0 && tasks.every((t) => t.checked) && !hasProse(body);
+  };
+  return d.reviewThreads.nodes
+    .filter((t) => {
+      const cs = t.comments.nodes;
+      if (t.isResolved || !cs.length || cs.at(-1)!.author?.login === me) return false;
+      const lastMine = cs.findLastIndex((c) => c.author?.login === me);
+      return !cs.slice(lastMine + 1).every((c) => checkedOff(c.body));
+    })
+    .map((t) => {
+      const cs = t.comments.nodes;
+      return { threadId: t.id, path: t.path, author: cs[0].author?.login ?? null, url: cs.at(-1)!.url };
+    });
 }
 
 /** Link to where a review finding points: the diff line, the file line outside the diff, or the thread. */

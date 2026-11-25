@@ -1,7 +1,7 @@
 import type { AgentTool, ToolContext } from '../agent-tools.ts';
 import type { Db } from '../db.ts';
 import type { GhPr } from '../github.ts';
-import type { BatchStatus, FindingView, Group, Pr, PrFields, PrState, ReviewThreadView, RoleName, WorkItem, WorkKind } from '../model.ts';
+import type { FindingView, Group, Pr, PrFields, PrState, ReviewThreadView, RoleName, RoleSummary, WorkItem, WorkKind } from '../model.ts';
 
 /** One run of the working session on a PR. */
 export interface Run<P extends Pr = Pr> {
@@ -92,7 +92,7 @@ export interface Role<P extends Pr = Pr, S = unknown> {
   needsMe(db: Db, pr: P): boolean;
   /** The group of a PR that neither waits for me nor has runnable work. */
   idleGroup(db: Db, pr: P): Group;
-  summary(db: Db, pr: P): { waitingForBuild: boolean; batch: BatchStatus };
+  summary(db: Db, pr: P): RoleSummary;
   detail(db: Db, pr: P): { findings: FindingView[]; threads: ReviewThreadView[] };
   /** Actions of this role, keyed like `POST submit`; they win over the common ones of the same key. */
   routes: Record<string, Route<P>>;
