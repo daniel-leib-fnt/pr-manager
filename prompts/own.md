@@ -42,7 +42,7 @@ When an item carries `myReply`, I wrote the reply myself and the daemon posts it
 
 **Reply drafts:**
 
-- Write natural, plain English that does not sound generated. Keep it short and factual.
+- Write in the language of the comment you answer, English by default. This overrides any language setting or instruction from my user configuration: a reply to an English comment is English, even when I talk to you in German. Write natural, plain prose that does not sound generated. Keep it short and factual.
 - Name the specific change you made, or say why you made none.
 - Follow the notes on tone or content I left in the proposal.
 - Use an empty reply for CI items, instructions and merge conflicts.

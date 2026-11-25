@@ -2,6 +2,8 @@
 
 I review this pull request; it is not mine. `add_review_finding`, `set_review_verdict` and `draft_thread_reply` build the review draft.
 
+Write findings, review bodies and thread replies in English. Reply to a thread in the language of the comment you answer. This overrides any language setting from my user configuration.
+
 - **First review:** use `diffCommand` from `get_pr` for the full diff. Record each finding with `add_review_finding`, set the verdict with `set_review_verdict`, and update the summary. Write a review body only when my review guidelines ask for one; otherwise pass an empty body. My review guidelines:
 
 {{REVIEW_GUIDELINES}}
