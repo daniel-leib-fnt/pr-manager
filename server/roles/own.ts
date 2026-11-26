@@ -204,6 +204,15 @@ export function handBack(db: Db, pr: OwnPr, threadId: string) {
   touchBatch(db, pr.id, true);
 }
 
+/**
+ * Checklist lines on the PR that are not checked off yet: the lines of other people's comments that pr-manager
+ * still has an item for (a done one was checked, or answered with the box left alone), and my open final review.
+ */
+export function openTasks(db: Db, pr: OwnPr): number {
+  const lines = db.comments(pr.id).filter((c) => c.task && c.state !== 'done' && c.state !== 'gone').length;
+  return lines + (pr.final_review_id ? 1 : 0);
+}
+
 /** What one run carries: the comments that were open when it started. */
 interface OwnRun {
   openAtStart: Set<number>;
@@ -367,6 +376,7 @@ export const own: Role<OwnPr, OwnRun> = {
     openThreads: openThreads(db, pr),
     waitingSince: waitingSince(pr),
     nudge: nudgeDue(pr) && batchOf(db, pr) === 'none' && !pr.ready,
+    openTasks: openTasks(db, pr),
   }),
 
   detail: () => ({ findings: [], threads: [] }),

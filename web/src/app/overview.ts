@@ -166,6 +166,9 @@ const typing = (e: KeyboardEvent) => e.target instanceof HTMLElement && !!e.targ
                     @if (pr.blocked) {
                       <span class="tag small bad">Blocked</span>
                     }
+                    @if (pr.openTasks) {
+                      <span class="tag small warn" [title]="pr.openTasks + ' unchecked task lines'">Open Tasks</span>
+                    }
                     @if (pr.nudge) {
                       <span class="tag small warn" title="Waited on others too long; follow up with the reviewers">Follow up</span>
                     }

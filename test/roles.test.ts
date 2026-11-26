@@ -456,6 +456,25 @@ test('an info note does not keep the PR with me; an action does, and a note with
   );
 });
 
+test('a PR has open tasks while a checklist line or my final review is not checked off', async () => {
+  const { db, ownPr } = setup();
+  assert.equal(own.summary(db, ownPr()).openTasks, 0);
+  await ingest(
+    db,
+    ownPr(),
+    'me',
+    detail([thread('T4', [{ id: 'c5', login: 'alice', body: '- [ ] add a test\n- [ ] add docs\n- [x] done already' }])]),
+  );
+  assert.equal(own.summary(db, ownPr()).openTasks, 2);
+  const [first] = db.comments(ownPr().id);
+  db.update('comments', first.id, { state: 'done' });
+  assert.equal(own.summary(db, ownPr()).openTasks, 1);
+  db.updatePr(ownPr().id, { final_review_id: 11 });
+  assert.equal(own.summary(db, ownPr()).openTasks, 2);
+  settleFinalReview(db, ownPr(), '* [x] Final review by @me', 'me');
+  assert.equal(own.summary(db, ownPr()).openTasks, 1);
+});
+
 test('my PR that waited on others too long comes back to me until I follow up', async () => {
   const { db, ownPr } = setup();
   saveOverrides({ pollDays: [0, 1, 2, 3, 4, 5, 6], waitingNudgeDays: 3 });

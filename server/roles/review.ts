@@ -327,6 +327,7 @@ export const review: Role<ReviewPr, ReviewRun> = {
     openThreads: [],
     waitingSince: pr.gh_updated_at || null,
     nudge: false,
+    openTasks: 0,
   }),
 
   detail(db, pr) {

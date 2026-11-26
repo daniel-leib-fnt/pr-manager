@@ -277,10 +277,15 @@ export interface SummaryFields {
   waitingSince: string | null;
   /** My PR waited on others too long (setting `waitingNudgeDays`): I follow up with the reviewers. */
   nudge: boolean;
+  /** Unchecked task lines that pr-manager knows of: checklist lines of comments on the PR not yet checked off, and my open final review. */
+  openTasks: number;
 }
 
 /** The part of the summary that each role computes. */
-export type RoleSummary = Pick<SummaryFields, 'waitingForBuild' | 'noBuild' | 'batch' | 'openThreads' | 'waitingSince' | 'nudge'>;
+export type RoleSummary = Pick<
+  SummaryFields,
+  'waitingForBuild' | 'noBuild' | 'batch' | 'openThreads' | 'waitingSince' | 'nudge' | 'openTasks'
+>;
 
 export type OwnPrSummary = OwnPr & SummaryFields;
 export type ReviewPrSummary = Omit<ReviewPr, 'review_threads'> & SummaryFields;

@@ -68,6 +68,9 @@ interface Entry {
       @if (pr().counts.pending) {
         <span class="tag">{{ plural(pr().counts.pending, 'change') }} wait for push</span>
       }
+      @if (pr().openTasks) {
+        <span class="tag warn" [title]="pr().openTasks + ' unchecked task lines'">Open Tasks</span>
+      }
     </ng-template>
 
     <ng-template #bannersEarly>
