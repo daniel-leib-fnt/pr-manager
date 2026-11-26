@@ -884,6 +884,10 @@ label select {
   background: var(--bad-bg);
   color: var(--bad);
 }
+.banner.info {
+  background: var(--info-bg);
+  color: var(--info);
+}
 .banner button {
   margin-left: auto;
 }

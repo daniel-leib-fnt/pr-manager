@@ -25,8 +25,8 @@ export function groupOf(db: Db, pr: Pr): Group {
   if (role.needsMe(db, pr) || db.questions(pr.id).some((q) => q.state === 'open')) return 'needs_me';
   if (db.workItems(pr.id).some((w) => w.state === 'queued' && role.runnable(pr, w.kind))) return 'queued';
   const idle = role.idleGroup(db, pr);
-  // A follow-up the agent left me holds nothing back: a push that is up next still goes first.
-  return idle !== 'push' && db.followUps(pr.id).some((f) => f.state === 'open') ? 'needs_me' : idle;
+  // An open `action` follow-up holds nothing back: a push that is up next still goes first. An `info` never counts.
+  return idle !== 'push' && db.followUps(pr.id).some((f) => f.state === 'open' && f.severity === 'action') ? 'needs_me' : idle;
 }
 
 function summary(db: Db, pr: Pr, running: boolean): PrSummary {
@@ -43,7 +43,7 @@ function summary(db: Db, pr: Pr, running: boolean): PrSummary {
       questions: db.questions(pr.id).filter((q) => q.state === 'open').length,
       pending: comments.filter((c) => c.state === 'fixed' || c.state === 'skipped').length,
       findings: db.findings(pr.id).filter((f) => f.state === 'draft').length,
-      followUps: db.followUps(pr.id).filter((f) => f.state === 'open').length,
+      followUps: db.followUps(pr.id).filter((f) => f.state === 'open' && f.severity === 'action').length,
     },
     ...roleOf(pr).summary(db, pr),
   } as PrSummary;

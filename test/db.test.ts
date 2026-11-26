@@ -79,3 +79,15 @@ test('a database from before the role tables is migrated without losing a value,
   assert.deepEqual(again.prByUrl('own'), own);
   assert.deepEqual(again.prByUrl('review'), review);
 });
+
+test('a follow-up from before the severity counts as an action', () => {
+  const path = join(mkdtempSync(join(tmpdir(), 'prm-db-')), 'pr-manager.db');
+  const old = new DatabaseSync(path);
+  old.exec(`
+    CREATE TABLE follow_ups (id INTEGER PRIMARY KEY, pr_id INTEGER NOT NULL, comment_id INTEGER, text TEXT NOT NULL,
+      state TEXT NOT NULL DEFAULT 'open', created_at TEXT NOT NULL DEFAULT '2026-11-01T00:00:00Z');
+    INSERT INTO follow_ups (pr_id, text) VALUES (1, 'Check it.');
+  `);
+  old.close();
+  assert.equal(openDb(path).followUps(1)[0].severity, 'action');
+});

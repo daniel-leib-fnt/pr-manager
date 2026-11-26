@@ -160,15 +160,20 @@ export interface Question {
   created_at: string;
 }
 
+/** action: I have to do or check something; info: I should know it and nothing is left for me to do. */
+export type FollowUpSeverity = 'info' | 'action';
+
 /**
- * Something the agent could not do or check and leaves to me, such as an assumption it did not verify or a
- * step outside the repository. It holds nothing back; open: waits for me to tick it off; done: I did.
+ * A note from the agent: something it could not do or check and leaves to me (action), or something I should
+ * know (info). It holds nothing back; open: waits for me to tick it off; done: I did. Only an open `action`
+ * keeps the PR with me; an `info` shows on the PR page only.
  */
 export interface FollowUp {
   id: number;
   pr_id: number;
   comment_id: number | null;
   text: string;
+  severity: FollowUpSeverity;
   state: 'open' | 'done';
   created_at: string;
 }
@@ -254,6 +259,7 @@ export type Group = 'ready' | 'needs_me' | 'working' | 'queued' | 'push' | 'out_
 export interface SummaryFields {
   group: Group;
   running: boolean;
+  /** `followUps` counts the open follow-ups of severity `action`. */
   counts: { proposals: number; questions: number; pending: number; findings: number; followUps: number };
   /** A review that is held back until the build is green. */
   waitingForBuild: boolean;

@@ -150,6 +150,7 @@ CREATE TABLE IF NOT EXISTS follow_ups (
   pr_id INTEGER NOT NULL REFERENCES prs(id) ON DELETE CASCADE,
   comment_id INTEGER,
   text TEXT NOT NULL,
+  severity TEXT NOT NULL DEFAULT 'action',
   state TEXT NOT NULL DEFAULT 'open',
   created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
 );
@@ -189,6 +190,7 @@ export type Db = ReturnType<typeof openDb>;
 /** Columns added after the first release; CREATE TABLE IF NOT EXISTS does not add them. */
 const ADDED_COLUMNS: [string, string, string][] = [
   ['comments', 'decision', 'TEXT'],
+  ['follow_ups', 'severity', "TEXT NOT NULL DEFAULT 'action'"],
   ['comments', 'outdated', 'INTEGER NOT NULL DEFAULT 0'],
   ['comments', 'diff_hunk', 'TEXT'],
   ['findings', 'resolve', 'INTEGER NOT NULL DEFAULT 0'],

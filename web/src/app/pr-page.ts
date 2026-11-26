@@ -130,10 +130,12 @@ import { Transcript } from './transcript';
           }
           <ng-container *ngTemplateOutlet="region('bannersLate')" />
           @for (f of openFollowUps(); track f.id) {
-            <div class="banner">
-              <strong>Follow-up from the agent:</strong>
+            <div class="banner" [class.info]="f.severity === 'info'">
+              <strong>{{ f.severity === 'info' ? 'Note from the agent:' : 'Follow-up from the agent:' }}</strong>
               <span class="pre">{{ f.text }}</span>
-              <button class="small" (click)="request({ name: 'follow-up-done', body: { id: f.id } })">Done</button>
+              <button class="small" (click)="request({ name: 'follow-up-done', body: { id: f.id } })">
+                {{ f.severity === 'info' ? 'Dismiss' : 'Done' }}
+              </button>
             </div>
           }
           @if (error()) {
@@ -258,7 +260,12 @@ export class PrPage {
 
   protected readonly lastWork = computed(() => this.data()?.work.at(-1) ?? null);
   /** What the agent left me to do or check, until I tick it off. */
-  protected readonly openFollowUps = computed(() => this.data()?.followUps.filter((f) => f.state === 'open') ?? []);
+  protected readonly openFollowUps = computed(
+    () =>
+      this.data()
+        ?.followUps.filter((f) => f.state === 'open')
+        .sort((a, b) => Number(b.severity === 'action') - Number(a.severity === 'action')) ?? [],
+  );
   protected readonly moreActions = computed(() => {
     const pr = this.data()?.pr;
     return (

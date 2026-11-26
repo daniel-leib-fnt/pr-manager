@@ -126,12 +126,12 @@ export function createAgentTools(
 
     def(
       'follow_up',
-      'Hands me something to do or check myself that you could not: an assumption you did not verify, a change you could not run or test, or a step outside this repository such as a setting in another repository or a ticket. It holds nothing back and needs no answer; I tick it off on the dashboard. Write it so that I can act on it without the transcript. Link it to a comment when it belongs to one.',
-      { text: z.string(), commentId: z.number().optional() },
-      async ({ text, commentId }) => {
+      'Leaves me a note on the dashboard. severity `action`: something I have to do or check myself before the merge that you could not: an assumption you did not verify, a change you could not run or test, or a step outside this repository such as a setting in another repository or a ticket. severity `info`: something I should know where nothing is left for me to do, for example what you tested and what CI covers. If something can go wrong without me, it is `action`. It holds nothing back and needs no answer; I tick it off on the dashboard. Write it so that I can act on it without the transcript. Link it to a comment when it belongs to one.',
+      { text: z.string(), severity: z.enum(['info', 'action']), commentId: z.number().optional() },
+      async ({ text, severity, commentId }) => {
         if (commentId !== undefined && db.comment(commentId)?.pr_id !== prId) return fail(`Unknown comment ${commentId}.`);
         if (!text.trim()) return fail('A follow-up needs a text.');
-        db.insert('follow_ups', { pr_id: prId, comment_id: commentId ?? null, text: text.trim() });
+        db.insert('follow_ups', { pr_id: prId, comment_id: commentId ?? null, text: text.trim(), severity });
         return touched(ok('Follow-up saved.'));
       },
     ),

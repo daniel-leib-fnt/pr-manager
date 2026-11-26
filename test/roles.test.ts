@@ -308,6 +308,22 @@ test('a follow-up the agent left me keeps the PR with me until I tick it off, bu
   assert.equal(groupOf(db, ownPr()), 'push');
 });
 
+test('an info note does not keep the PR with me; an action does, and a note without a severity is an action', () => {
+  const { db, ownPr } = setup();
+  const info = db.insert('follow_ups', { pr_id: ownPr().id, text: 'Only X ran locally.', severity: 'info' });
+  assert.equal(groupOf(db, ownPr()), 'waiting');
+  const action = db.insert('follow_ups', { pr_id: ownPr().id, text: 'Check Y.' });
+  assert.equal(db.followUps(ownPr().id).find((f) => f.id === action)!.severity, 'action');
+  assert.equal(groupOf(db, ownPr()), 'needs_me');
+  settleFollowUp(db, ownPr(), action);
+  assert.equal(groupOf(db, ownPr()), 'waiting');
+  settleFollowUp(db, ownPr(), info);
+  assert.equal(
+    db.followUps(ownPr().id).every((f) => f.state === 'done'),
+    true,
+  );
+});
+
 test('my PR that waited on others too long comes back to me until I follow up', async () => {
   const { db, ownPr } = setup();
   saveOverrides({ pollDays: [0, 1, 2, 3, 4, 5, 6], waitingNudgeDays: 3 });
