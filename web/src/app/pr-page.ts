@@ -17,6 +17,31 @@ import { Transcript } from './transcript';
   imports: [FormsModule, DatePipe, NgTemplateOutlet, Transcript, Ci, OwnPr, ReviewPr],
   template: `
     @if (data(); as d) {
+      <!-- The role component comes first: the regions below render its templates, which read its inputs, so the
+           inputs have to be bound before those regions are checked (NG0950 otherwise). Its host is display: none. -->
+      @if (d.pr.role === 'own') {
+        <app-own-pr
+          [pr]="d.pr"
+          [comments]="d.comments"
+          [questions]="d.questions"
+          [draft]="draft()"
+          [busy]="busy()"
+          (changed)="persist()"
+          (action)="request($event)"
+        />
+      } @else {
+        <app-review-pr
+          [pr]="d.pr"
+          [findings]="d.findings"
+          [threads]="d.threads"
+          [draft]="draft()"
+          [busy]="busy()"
+          (changed)="persist()"
+          (action)="request($event)"
+          (openSummary)="tab.set('summary')"
+        />
+      }
+
       <header class="pr-header">
         <div class="page">
           <div class="pr-head-row">
@@ -207,29 +232,6 @@ import { Transcript } from './transcript';
           </section>
         </aside>
       </div>
-
-      @if (d.pr.role === 'own') {
-        <app-own-pr
-          [pr]="d.pr"
-          [comments]="d.comments"
-          [questions]="d.questions"
-          [draft]="draft()"
-          [busy]="busy()"
-          (changed)="persist()"
-          (action)="request($event)"
-        />
-      } @else {
-        <app-review-pr
-          [pr]="d.pr"
-          [findings]="d.findings"
-          [threads]="d.threads"
-          [draft]="draft()"
-          [busy]="busy()"
-          (changed)="persist()"
-          (action)="request($event)"
-          (openSummary)="tab.set('summary')"
-        />
-      }
     } @else {
       <p class="muted page">Loading…</p>
     }
