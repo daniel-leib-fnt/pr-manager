@@ -13,7 +13,6 @@ const OWN_COLUMNS = [
   'self_review_state',
   'self_review_result',
   'self_review_round',
-  'push_after',
   'open_threads',
   'nudged_at',
 ] as const satisfies readonly (keyof OwnFields)[];
@@ -83,7 +82,6 @@ CREATE TABLE IF NOT EXISTS own_prs (
   self_review_state TEXT,
   self_review_result TEXT,
   self_review_round INTEGER NOT NULL DEFAULT 0,
-  push_after TEXT,
   open_threads TEXT,
   nudged_at TEXT
 );
@@ -212,11 +210,16 @@ const LEGACY_PR_COLUMNS: [string, string, string][] = [
   ['prs', 'self_review_state', 'TEXT'],
   ['prs', 'self_review_result', 'TEXT'],
   ['prs', 'self_review_round', 'INTEGER NOT NULL DEFAULT 0'],
-  ['prs', 'push_after', 'TEXT'],
   ['prs', 'open_threads', 'TEXT'],
   ['prs', 'nudged_at', 'TEXT'],
   ['prs', 'head_seen_at', 'TEXT'],
   ['prs', 'review_without_build', 'INTEGER NOT NULL DEFAULT 0'],
+];
+
+/** Columns that no longer exist: the veto window is gone. A database older than the role tables has it in `prs`. */
+const DROPPED_COLUMNS: [string, string][] = [
+  ['own_prs', 'push_after'],
+  ['prs', 'push_after'],
 ];
 
 function migrate(db: DatabaseSync, path: string) {
@@ -248,6 +251,11 @@ function migrate(db: DatabaseSync, path: string) {
       throw e;
     }
   }
+
+  // Columns that went away. The view names them, so it goes first; it is recreated below.
+  const dropped: [string, string][] = DROPPED_COLUMNS.filter(([table, column]) => columns(table).includes(column));
+  if (dropped.length) db.exec('DROP VIEW IF EXISTS pr_view');
+  for (const [table, column] of dropped) db.exec(`ALTER TABLE ${table} DROP COLUMN ${column}`);
 
   // Recreated on every start, so the view always shows the columns the tables have now.
   db.exec(`

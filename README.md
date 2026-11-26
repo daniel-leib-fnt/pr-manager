@@ -21,7 +21,6 @@ A local daemon with a dashboard for my GitHub pull requests: the ones I authored
   - Before the agent asks me a question, it looks the facts up itself. With a defensible assumption it proposes the change, names the assumption, and repeats it in the reply to the reviewer. Only without one it asks.
   - When a batch is complete, a second agent session reviews its diff before the push: a fresh session without the working session's context, read-only, with no tests to run, and with its own prompt and model. It reports a verdict and its own risk class of the diff.
   - Findings it marks as fixable go back to the working agent once. Findings that need a decision, findings left after that round, a review that fails or reports nothing, and a diff it rates above what the agent may decide all put the PR under "Needs me", where I repeat the review, give an instruction, or push anyway.
-  - A reviewed batch the agent decided alone, with a change above `local`, then waits out the veto window (default 4 hours, counted only on the active days and hours) in "Waiting for push" with a red "Auto" tag. The PR page shows the review, the time of the push and "Push now". An instruction makes the agent rework the batch; the review and the window then start over. A batch I submitted myself is reviewed too, but pushed without a window.
   - Items that wait for me wait without a deadline; nothing is decided because I did not answer.
 - **PRs I review:** the agent writes one review draft with findings and a suggested verdict. I edit and submit it, and can skip single findings or the review body.
   - A review body is written only when the review guidelines ask for one. The default guidelines ask for it only when work spans several findings, listed as task lines.
@@ -67,7 +66,7 @@ Settings come in two kinds:
   - Build: ignored checks, minimum successful checks, globally and per repository.
   - Reviews: wait for a green build, automatic follow-up, review guidelines.
   - My PRs: the small-change rubric, CI fix attempts, batch quiet time, the follow-up threshold, thread resolving, reply header, auto-removal of merged worktrees.
-  - Autonomy: the opt-in switch, the confidence from which the agent decides contained and structural changes, the veto window, additional guidance appended to the risk classes, the prompt and the model of the self-review.
+  - Autonomy: the opt-in switch, the confidence from which the agent decides contained and structural changes, additional guidance appended to the risk classes, the prompt and the model of the self-review.
   - Agent: allowed tools, parallel sessions, model, turn and budget limits.
   - Notifications: which events notify.
 
@@ -91,7 +90,6 @@ Personal preferences belong into the settings, not into the repository: the defa
 services.pr-manager.settings = {
   autonomy = true;
   autonomyContained = "medium";
-  vetoMinutes = 240;
   decisionNotes = "Never change database migrations without me.";
 };
 ```

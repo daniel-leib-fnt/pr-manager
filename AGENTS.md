@@ -38,7 +38,7 @@ The server is layered. A module imports only from its own layer or a lower one; 
 | Roles | `roles/` | What differs between my own PRs and the PRs I review (see below) |
 | Base | `prs.ts`, `agent-tools.ts` | What every PR has: block, pause, instruction, answers, cleanup of worktree and session; the MCP server `pr` with the tools of every PR (`get_pr`, `set_summary`, `ask`, `withdraw_question`, `follow_up`, `report_blocked`) |
 | Infrastructure | `config.ts`, `db.ts`, `settings.ts`, `git.ts`, `github.ts`, `notify.ts`, `excerpt.ts`, `util.ts` | Env config; SQLite schema, migrations, query helpers; settings (`DEFS`, precedence dashboard override > Nix file > default, prompt templating, denied tool calls); git via `execFile` (worktrees, sync, rebase, push, per-repo serialization); GraphQL/REST client; desktop notifications; event bus |
-| Rules | `batch.ts`, `bot-comment.ts`, `checklist.ts` | Pure functions: batch open/closable, reply text, thread resolving, autonomy limits, self-review outcome, veto window; marking and cutting bot comments in `get_pr` (read time only, `comments.body` keeps the full text); Markdown task lists. No database, no settings, no clock: callers pass the values |
+| Rules | `batch.ts`, `bot-comment.ts`, `checklist.ts` | Pure functions: batch open/closable, reply text, thread resolving, autonomy limits, self-review outcome; marking and cutting bot comments in `get_pr` (read time only, `comments.body` keeps the full text); Markdown task lists. No database, no settings, no clock: callers pass the values |
 | Model | `model.ts` | Row types, state machines and API payload types. Types only and no imports, because the web app compiles it too |
 
 ### Roles
@@ -77,7 +77,7 @@ A new kind of PR is a new `Role` implementation registered in `roles/index.ts`, 
 1. Poller: search → upsert `prs` → `Role.reconcile` (what I did on GitHub directly, such as a review) → `Role.polled`. For my own PRs, `ingest` adds `comments` rows (kinds in `CommentKind`) and enqueues a `work_items` row; for reviews, a `review` item is enqueued.
 2. Runner: one queued kind set per PR → `preflight` (worktree, interactive session check, `Role.syncWorktree`) → `Role.runQueued` for work without the working session (push, self-review) → `query()` with the `pr` MCP server.
 3. Agent: changes code, amends, reports via MCP tools. Comment states: `new → fixed | proposal | done`, `proposal → accepted | skipped` (dashboard), `accepted → fixed`.
-4. With `autonomy`: before the push, `closeBatch` enqueues `self_review`; `selfReview` in `roles/own.ts` reviews the batch diff in a fresh read-only session (`readOnlySession` of the runner), and `pushAllowed` in `roles/own-batch.ts` lets the push through only after a passed review of exactly that HEAD and, for a batch the agent decided alone, the veto window.
+4. With `autonomy`: before the push, `closeBatch` enqueues `self_review`; `selfReview` in `roles/own.ts` reviews the batch diff in a fresh read-only session (`readOnlySession` of the runner), and `pushAllowed` in `roles/own-batch.ts` lets the push through only after a passed review of exactly that HEAD.
 5. Batch closes (quiet time elapsed, nothing open): `closeBatch` rebases, pushes with `--force-with-lease`, posts replies, resolves threads, sets comments `done`. A failed rebase becomes a `conflict` item and reopens the batch.
 
 State machines and their meaning are documented next to the types in `server/model.ts`. Read them before changing a state transition.

@@ -92,7 +92,7 @@ in
         autoFollowupOnReRequest, reviewGuidelines, smallChangeRubric, maxCiAttempts,
         batchQuietMinutes, waitingNudgeDays, resolveThreads ("fixed_and_skipped_with_reason",
         "fixed", "never"), replyHeader ({viewer} is replaced), autoRemoveMergedWorktrees, autonomy,
-        autonomyContained and autonomyStructural ("never", "high", "medium", "low"), vetoMinutes,
+        autonomyContained and autonomyStructural ("never", "high", "medium", "low"),
         decisionNotes, selfReviewPrompt ({{RISK_CLASSES}} is replaced), selfReviewModel, allowedTools,
         maxParallelSessions, model, maxTurns, maxBudgetUsd, notify ("input", "review_draft",
         "blocked", "error"). Unknown keys and invalid values are logged and ignored.

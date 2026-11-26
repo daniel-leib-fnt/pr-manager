@@ -3,17 +3,7 @@ import { Component, TemplateRef, computed, input, output, signal, viewChild } fr
 import { FormsModule } from '@angular/forms';
 import type { Comment, OwnPrSummary, Question, SelfReview } from './api';
 import { CodeExcerpt } from './code-excerpt';
-import {
-  type Action,
-  type ActionRequest,
-  type Decision,
-  type Draft,
-  type RoleRegions,
-  age,
-  plural,
-  pushTime,
-  vetoPending,
-} from './pr-view';
+import { type Action, type ActionRequest, type Decision, type Draft, type RoleRegions, age, plural } from './pr-view';
 
 const ACTIONS: { value: Action; label: string; help: string }[] = [
   { value: 'accept', label: 'Accept', help: 'The agent implements the proposal; the thread is resolved.' },
@@ -64,7 +54,7 @@ interface Entry {
 
 /**
  * What belongs to my own PRs: decisions on the agent's proposals and questions, the batch waiting for its
- * push, the self-review and the veto window. Fills the regions of the page frame; renders nothing itself.
+ * push and the self-review. Fills the regions of the page frame; renders nothing itself.
  */
 @Component({
   selector: 'app-own-pr',
@@ -88,7 +78,7 @@ interface Entry {
           <button class="small" (click)="action.emit({ name: 'retry-review' })">Repeat review</button>
           <button
             class="small"
-            (click)="action.emit({ name: 'push-now', confirm: 'Push the changes although the self-review did not pass?' })"
+            (click)="action.emit({ name: 'push-anyway', confirm: 'Push the changes although the self-review did not pass?' })"
           >
             Push anyway
           </button>
@@ -323,14 +313,6 @@ interface Entry {
 
       <section class="card panel">
         <h2>Push</h2>
-        @if (veto(pr())) {
-          <p>
-            <span class="tag small bad">Auto</span>
-            The agent decided this batch alone. It is pushed {{ pushTime(pr().push_after!) }} unless I step in: an instruction makes the
-            agent rework it, and pausing the PR holds it.
-          </p>
-          <button class="small" (click)="action.emit({ name: 'push-now' })" [disabled]="busy()">Push now</button>
-        }
         @if (selfReview(); as r) {
           @if (r.verdict) {
             <p class="muted small">
@@ -384,8 +366,6 @@ export class OwnPr implements RoleRegions {
   protected readonly actions = ACTIONS;
   protected readonly plural = plural;
   protected readonly age = age;
-  protected readonly pushTime = pushTime;
-  protected readonly veto = vetoPending;
   /** The review the open batch got before its push, if one ran. */
   protected readonly selfReview = computed(() => {
     const raw = this.pr().self_review_result;

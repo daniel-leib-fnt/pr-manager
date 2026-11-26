@@ -55,8 +55,6 @@ export interface OwnFields {
   self_review_result: string | null;
   /** Correction rounds the self-review sent back to the agent in the open batch. */
   self_review_round: number;
-  /** End of the veto window: a reviewed batch the agent decided alone is pushed only after this time. */
-  push_after: string | null;
   /** JSON `OpenThread[]`: review threads open on GitHub without my reply, as of the last ingest; null before the first. */
   open_threads: string | null;
   /** When I last followed up on a PR that waited too long; the wait counts from here or the last GitHub activity. */

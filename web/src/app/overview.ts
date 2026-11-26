@@ -3,7 +3,7 @@ import { Router, RouterLink, RouterLinkActive } from '@angular/router';
 import { Api, type Group, type Pr } from './api';
 import { Ci } from './ci';
 import { setFaviconBadge } from './favicon';
-import { nextStep, vetoPending } from './pr-view';
+import { nextStep } from './pr-view';
 
 const GROUPS: { key: Group; label: string }[] = [
   { key: 'ready', label: 'Ready to merge' },
@@ -172,9 +172,6 @@ const typing = (e: KeyboardEvent) => e.target instanceof HTMLElement && !!e.targ
                     @if (pr.noBuild) {
                       <span class="tag small bad" title="No build ran for this head; the review waits for me">No build</span>
                     }
-                    @if (veto(pr)) {
-                      <span class="tag small bad" title="Decided by the agent alone; pushed when the veto window ends">Auto</span>
-                    }
                     <span class="ref">{{ shortRepo(pr.repo) }}#{{ pr.number }}</span>
                     <app-ci [state]="pr.check_state" />
                   </span>
@@ -204,7 +201,6 @@ export class Overview {
   protected readonly filters = signal(loadFilters());
   protected readonly search = signal('');
   protected readonly next = nextStep;
-  protected readonly veto = vetoPending;
   protected readonly groups = computed(() => {
     const f = this.filters();
     const search = this.search().trim().toLowerCase();

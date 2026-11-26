@@ -105,19 +105,6 @@ export function ciStatus(checkState: string | null): CiStatus | null {
 
 export const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
 
-/** A reviewed batch the agent decided alone, waiting out the veto window before its push. */
-export const vetoPending = (pr: Pr) =>
-  pr.role === 'own' && pr.group === 'push' && !!pr.push_after && Date.parse(pr.push_after) > Date.now();
-
-/** "at 14:30" today, "on Mon at 09:10" on another day. */
-export function pushTime(iso: string): string {
-  const at = new Date(iso);
-  const time = at.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-  return at.toDateString() === new Date().toDateString()
-    ? `at ${time}`
-    : `on ${at.toLocaleDateString([], { weekday: 'short' })} at ${time}`;
-}
-
 /** "today", "1 day", "5 days": how long ago a time was, in calendar days. */
 export function age(iso: string): string {
   const start = new Date(iso);
@@ -157,8 +144,6 @@ export function nextStep(pr: Pr): string {
   if (pr.noBuild) return 'No build ran: review without build or ignore';
   if (pr.waitingForBuild) return 'Review waits for a green build';
   if (pr.group === 'queued') return 'Queued for the agent';
-  if (pr.role === 'own' && vetoPending(pr))
-    return `Push of ${plural(pr.counts.pending, 'change')} ${pushTime(pr.push_after!)} unless I step in`;
   if (pr.group === 'push') return `Push of ${plural(pr.counts.pending, 'change')} up next`;
   if (pr.group === 'ready') return 'Ready to merge';
   if (pr.group === 'out_of_date') return 'Review out of date';

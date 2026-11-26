@@ -4,19 +4,17 @@ import { Blocked, Diverged, git, isDirty, localChanged, push, rebaseOntoBase, sy
 import { GithubError, resolveThread, rest, viewer } from '../github.ts';
 import type { Comment, Decision, OpenThread, OwnPr, SelfReview } from '../model.ts';
 import { clearNotification } from '../notify.ts';
-import { addActiveMinutes, batchStatus, readyToClose, replyFor, shouldResolve, vetoApplies } from '../batch.ts';
+import { batchStatus, readyToClose, replyFor, shouldResolve } from '../batch.ts';
 import { block, submitAnswers } from '../prs.ts';
-import { activeHours, setting } from '../settings.ts';
+import { setting } from '../settings.ts';
 import { bus, changed } from '../util.ts';
 
 /**
- * New activity on an open batch: a running veto window starts over, and a failed self-review is retried on
- * what comes next. When the activity is mine, the agent also gets its correction round back.
+ * New activity on an open batch: a failed self-review is retried on what comes next. When the activity is mine, the agent also gets its correction round back.
  */
 export function touchBatch(db: Db, prId: number, mine: boolean) {
   const pr = db.pr(prId) as OwnPr;
   db.updatePr(prId, {
-    push_after: null,
     self_review_state: pr.self_review_state === 'failed' ? null : pr.self_review_state,
     ...(mine ? { self_review_round: 0 } : {}),
   });
@@ -74,24 +72,18 @@ export function addDiverged(db: Db, pr: OwnPr, e: Diverged): boolean {
 }
 
 /**
- * With autonomy, changed code is pushed only after a self-review of exactly this HEAD passed, and a batch
- * the agent decided alone waits out the veto window on top. Returns whether the push may go ahead.
+ * With autonomy, changed code is pushed only after a self-review of exactly this HEAD passed. Returns whether
+ * the push may go ahead.
  */
 async function pushAllowed(db: Db, pr: OwnPr, path: string): Promise<boolean> {
   const head = await git(path, ['rev-parse', 'HEAD']);
   if (pr.self_review_sha !== head || !pr.self_review_state) {
-    db.updatePr(pr.id, { self_review_sha: head, self_review_state: null, self_review_result: null, push_after: null });
+    db.updatePr(pr.id, { self_review_sha: head, self_review_state: null, self_review_result: null });
     db.enqueue(pr.id, 'self_review');
     changed(pr.id);
     return false;
   }
-  if (pr.self_review_state !== 'passed') return false;
-  if (pr.push_after) return Date.parse(pr.push_after) <= Date.now();
-  const review = pr.self_review_result ? (JSON.parse(pr.self_review_result) as SelfReview) : null;
-  if (!setting('vetoMinutes') || !vetoApplies(db.comments(pr.id), review)) return true;
-  db.updatePr(pr.id, { push_after: addActiveMinutes(new Date(), setting('vetoMinutes'), activeHours()).toISOString() });
-  changed(pr.id);
-  return false;
+  return pr.self_review_state === 'passed';
 }
 
 // A checklist item quotes just its line, a whole comment its beginning.
@@ -285,7 +277,6 @@ export async function closeBatch(ctx: { db: Db; pr: OwnPr; ingest: (pr: OwnPr) =
     self_review_state: null,
     self_review_result: null,
     self_review_round: 0,
-    push_after: null,
   });
   changed(pr.id);
 }
@@ -368,10 +359,10 @@ export function checkBatches(db: Db) {
   }
 }
 
-/** Ends the veto window, and lets a batch through whose self-review did not pass. */
-export function pushNow(db: Db, pr: OwnPr) {
-  if (pr.self_review_state !== 'failed' && !pr.push_after) throw new Error('Nothing waits for my go-ahead.');
-  db.updatePr(pr.id, { self_review_state: 'passed', push_after: now() });
+/** Lets a batch through whose self-review did not pass. */
+export function pushAnyway(db: Db, pr: OwnPr) {
+  if (pr.self_review_state !== 'failed') throw new Error('There is no failed self-review to push past.');
+  db.updatePr(pr.id, { self_review_state: 'passed' });
   clearNotification(`self-review:${pr.id}`);
   changed(pr.id);
   checkBatches(db);

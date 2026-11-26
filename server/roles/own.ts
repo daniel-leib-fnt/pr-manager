@@ -18,7 +18,7 @@ import {
   checkBatches,
   closeBatch,
   openBatch,
-  pushNow,
+  pushAnyway,
   recheckAfterPush,
   REOPENED,
   remark,
@@ -372,7 +372,7 @@ export const own: Role<OwnPr, OwnRun> = {
       if (!recheckAfterPush(db, pr)) throw new Error('No open proposal or question to check again.');
     },
     'POST hand-back': ({ db, pr, body }) => handBack(db, pr, String((body as { threadId?: string }).threadId)),
-    'POST push-now': ({ db, pr }) => pushNow(db, pr),
+    'POST push-anyway': ({ db, pr }) => pushAnyway(db, pr),
     'POST retry-review': ({ db, pr }) => retrySelfReview(db, pr),
     'POST nudged': ({ db, pr }) => {
       db.updatePr(pr.id, { nudged_at: now() });

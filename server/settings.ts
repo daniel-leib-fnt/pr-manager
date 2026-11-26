@@ -266,14 +266,6 @@ export const DEFS = {
     schema: threshold,
     default: 'never' as Threshold,
   }),
-  vetoMinutes: def({
-    group: 'Autonomy',
-    label: 'Veto window (minutes)',
-    help: 'A reviewed batch the agent decided alone, with a change above "small", is pushed only after this long. Only the active days and hours under "Polling" count. 0 pushes right away.',
-    type: 'number',
-    schema: z.number().int().min(0).max(10080),
-    default: 240,
-  }),
   decisionNotes: def({
     group: 'Autonomy',
     label: 'Additional guidance for decisions',
@@ -488,9 +480,6 @@ export const selfReviewPrompt = () => setting('selfReviewPrompt').replace('{{RIS
 
 /** What the agent may decide on its own above small changes. */
 export const autonomyLimits = (): Limits => ({ contained: setting('autonomyContained'), structural: setting('autonomyStructural') });
-
-/** The active days and hours, which also time the veto window. */
-export const activeHours = () => ({ days: setting('pollDays'), from: setting('pollFromHour'), to: setting('pollToHour') });
 
 export const isExcluded = (repo: string) => setting('excludedRepos').some((r) => r.toLowerCase() === repo.toLowerCase());
 

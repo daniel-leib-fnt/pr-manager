@@ -158,7 +158,7 @@ test('a push from outside makes the agent look at its open questions again', () 
   assert.equal(db.workItems(id).length, 1);
 });
 
-test("pre-decisions that take effect without me are the agent's, and new activity restarts the veto window", () => {
+test("pre-decisions that take effect without me are the agent's, and new activity retries a failed self-review", () => {
   const db = openDb(':memory:');
   const id = db.insertPr({
     url: 'u',
@@ -170,7 +170,6 @@ test("pre-decisions that take effect without me are the agent's, and new activit
     head_ref: 'h',
     head_sha: 'a1',
     base_ref: 'main',
-    push_after: '2026-11-24T12:00:00Z',
     self_review_state: 'failed',
     self_review_round: 1,
   });
@@ -187,7 +186,6 @@ test("pre-decisions that take effect without me are the agent's, and new activit
   assert.equal(db.comment(c)!.by_agent, 1);
 
   addConflict(db, db.pr(id) as OwnPr, 'a1', 'b1');
-  assert.equal((db.pr(id) as OwnPr).push_after, null);
   assert.equal((db.pr(id) as OwnPr).self_review_state, null, 'a failed review is retried on what comes next');
   assert.equal((db.pr(id) as OwnPr).self_review_round, 1, 'activity that is not mine gives no new correction round');
 });

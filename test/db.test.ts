@@ -63,7 +63,7 @@ test('a database from before the role tables is migrated without losing a value,
     [own.paused, own.kept, own.batch_head_sha, own.last_event_at, own.ci_attempts, own.ready, own.self_review_state, own.self_review_round],
     [1, 'kept', 'b0', '2026-11-01T00:00:00Z', 2, 1, 'failed', 1],
   );
-  assert.equal(own.push_after, '2026-11-02T00:00:00Z');
+  assert.ok(!('push_after' in own), 'the veto window is gone');
   const review = db.prByUrl('review') as ReviewPr;
   assert.deepEqual(
     [review.in_review_search, review.review_state, review.review_verdict, review.review_body, review.review_draft_sha, review.reviewed_sha],
@@ -73,6 +73,7 @@ test('a database from before the role tables is migrated without losing a value,
   assert.equal(db.comments(own.id).length, 1);
   const columns = db.all<{ name: string }>('PRAGMA table_info(prs)').map((c) => c.name);
   assert.ok(!columns.includes('review_state') && !columns.includes('batch_head_sha'), 'the role columns left the base table');
+  assert.ok(!columns.includes('push_after'), 'a column that went away is dropped from the base table too');
 
   // Opening it again migrates nothing and changes nothing.
   const again = openDb(path);
@@ -90,4 +91,15 @@ test('a follow-up from before the severity counts as an action', () => {
   `);
   old.close();
   assert.equal(openDb(path).followUps(1)[0].severity, 'action');
+});
+
+test('a database that still has the veto window column loses it', () => {
+  const path = join(mkdtempSync(join(tmpdir(), 'prm-db-')), 'pr-manager.db');
+  const first = openDb(path);
+  const id = first.insertPr({ ...base, url: 'own', role: 'own' });
+  first.run('ALTER TABLE own_prs ADD COLUMN push_after TEXT');
+  first.run(`UPDATE own_prs SET push_after = '2026-11-02T00:00:00Z' WHERE pr_id = ?`, id);
+  const again = openDb(path);
+  assert.ok(!again.all<{ name: string }>('PRAGMA table_info(own_prs)').some((c) => c.name === 'push_after'));
+  assert.equal(again.pr(id)!.url, 'own');
 });

@@ -22,8 +22,8 @@ export function batchStatus(comments: Comment[], questions: Question[], work: Wo
 /** A closable batch is closed only after no new activity for `quietMs`. */
 export function readyToClose(pr: OwnPr, status: BatchStatus, rules: { quietMs: number; autonomy: boolean }, now = Date.now()): boolean {
   if (pr.state !== 'open' || status !== 'closable' || pr.paused || pr.blocked) return false;
-  // A failed self-review waits for me, and a veto window for its end.
-  if (rules.autonomy && (pr.self_review_state === 'failed' || (pr.push_after && now < Date.parse(pr.push_after)))) return false;
+  // A failed self-review waits for me.
+  if (rules.autonomy && pr.self_review_state === 'failed') return false;
   return !pr.last_event_at || now - Date.parse(pr.last_event_at) >= rules.quietMs;
 }
 
@@ -60,7 +60,7 @@ export function shouldResolve(c: Comment, all: Comment[], mode: string): boolean
   return thread.filter((x) => x.state === 'fixed' || x.state === 'skipped').at(-1)?.id === c.id;
 }
 
-// --- Autonomy: what the agent may decide, the self-review before a push, the veto window ---
+// --- Autonomy: what the agent may decide, the self-review before a push ---
 
 /** The least confidence at which the agent may decide a change of that class alone. */
 export type Limits = Record<'contained' | 'structural', Confidence | 'never'>;
@@ -76,13 +76,12 @@ export function mayDecide(risk: RiskClass, confidence: Confidence, limits: Limit
 
 /**
  * How much of the pending batch the agent decided without me: `autonomous` when I submitted none of its
- * items, `aboveLocal` when one of the agent's own decisions is riskier than a small change.
+ * items.
  */
 export function batchAutonomy(comments: Comment[]) {
   const pending = comments.filter((c) => PENDING_STATES.has(c.state));
   return {
     autonomous: pending.length > 0 && pending.every((c) => c.by_agent || c.auto),
-    aboveLocal: pending.some((c) => c.by_agent && !!c.risk && c.risk !== 'local'),
   };
 }
 
@@ -111,33 +110,6 @@ export function reviewOutcome(review: SelfReviewResult | undefined, round: numbe
       reason: `The self-review classifies the changes as ${review.riskClass}, which the agent may not decide alone.`,
     };
   return { state: 'passed' };
-}
-
-/** Whether a passed batch waits out the veto window: only one the agent decided alone, with a change above small. */
-export function vetoApplies(comments: Comment[], review: Pick<Partial<SelfReviewResult>, 'riskClass'> | null): boolean {
-  const a = batchAutonomy(comments);
-  return a.autonomous && (a.aboveLocal || (!!review && review.riskClass !== 'local'));
-}
-
-/**
- * `minutes` later, counting only time inside the active days and hours (local time), so that a window
- * never runs out overnight or over the weekend. Without active days the wall clock counts.
- */
-export function addActiveMinutes(start: Date, minutes: number, active: { days: number[]; from: number; to: number }): Date {
-  let left = minutes * 60_000;
-  if (!active.days.length || active.to <= active.from) return new Date(start.getTime() + left);
-  let t = new Date(start);
-  for (;;) {
-    const open = new Date(t.getFullYear(), t.getMonth(), t.getDate(), active.from);
-    const close = new Date(t.getFullYear(), t.getMonth(), t.getDate(), active.to);
-    if (active.days.includes(t.getDay()) && t < close) {
-      if (t < open) t = open;
-      const room = close.getTime() - t.getTime();
-      if (left <= room) return new Date(t.getTime() + left);
-      left -= room;
-    }
-    t = new Date(t.getFullYear(), t.getMonth(), t.getDate() + 1);
-  }
 }
 
 /**

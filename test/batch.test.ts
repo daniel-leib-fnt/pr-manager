@@ -2,7 +2,6 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
   activeDaysBetween,
-  addActiveMinutes,
   batchAutonomy,
   batchStatus,
   mayDecide,
@@ -10,7 +9,6 @@ import {
   replyFor,
   reviewOutcome,
   shouldResolve,
-  vetoApplies,
 } from '../server/batch.ts';
 import type { Comment, OwnPr, Question, ReviewState, SelfReviewResult, WorkItem } from '../server/model.ts';
 import { reReviewReason } from '../server/roles/review.ts';
@@ -175,8 +173,8 @@ test('a batch is autonomous only when I submitted none of its pending items', ()
   const small = comment({ id: 2, state: 'fixed', by_agent: 1, risk: 'local' });
   const ci = comment({ id: 3, kind: 'ci', state: 'fixed', auto: 1 });
   const mine = comment({ id: 4, state: 'fixed' });
-  assert.deepEqual(batchAutonomy([agent, ci]), { autonomous: true, aboveLocal: true });
-  assert.deepEqual(batchAutonomy([small, ci]), { autonomous: true, aboveLocal: false });
+  assert.deepEqual(batchAutonomy([agent, ci]), { autonomous: true });
+  assert.deepEqual(batchAutonomy([small, ci]), { autonomous: true });
   assert.equal(batchAutonomy([agent, mine]).autonomous, false);
   assert.equal(batchAutonomy([comment({ state: 'done', by_agent: 1 })]).autonomous, false, 'nothing pending');
 });
@@ -200,35 +198,12 @@ test('a self-review passes, sends findings back once, or waits for me', () => {
   assert.equal(reviewOutcome({ ...changes, route: 'escalate' }, 0, false, limits).state, 'failed');
 });
 
-test('the veto window applies to batches the agent decided alone, above small changes', () => {
-  const agent = (risk: 'local' | 'contained') => comment({ state: 'fixed', by_agent: 1, risk });
-  const pass = (riskClass: 'local' | 'contained'): SelfReviewResult => ({ riskClass, verdict: 'pass', summary: '', findings: [] });
-  assert.equal(vetoApplies([agent('contained')], pass('contained')), true);
-  assert.equal(vetoApplies([agent('local')], pass('local')), false);
-  assert.equal(vetoApplies([agent('local')], pass('contained')), true, 'the review rates the diff higher than the agent did');
-  assert.equal(vetoApplies([agent('contained'), comment({ id: 2, state: 'fixed' })], pass('contained')), false, 'I submitted the batch');
-});
-
-test('the veto window counts only active days and hours', () => {
-  const active = { days: [1, 2, 3, 4, 5], from: 7, to: 18 };
-  const at = (day: number, h: number, m = 0) => new Date(2026, 10, day, h, m); // November 2026: the 23rd is a Monday
-  assert.deepEqual(addActiveMinutes(at(23, 9), 240, active), at(23, 13));
-  assert.deepEqual(addActiveMinutes(at(23, 16), 240, active), at(24, 9), 'two hours today, two tomorrow');
-  assert.deepEqual(addActiveMinutes(at(27, 17), 240, active), at(30, 10), 'over the weekend');
-  assert.deepEqual(addActiveMinutes(at(28, 12), 60, active), at(30, 8), 'started on a Saturday');
-  assert.deepEqual(addActiveMinutes(at(23, 5), 30, active), at(23, 7, 30), 'started before the active hours');
-  assert.deepEqual(addActiveMinutes(at(23, 9), 60, { days: [], from: 7, to: 18 }), at(23, 10), 'without active days the wall clock counts');
-});
-
-test('with autonomy, a failed self-review and a running veto window hold the push back', () => {
+test('with autonomy, a failed self-review holds the push back', () => {
   const now = Date.parse('2026-11-24T10:00:00Z');
-  const held = [pr({ self_review_state: 'failed' }), pr({ push_after: '2026-11-24T11:00:00Z' })];
-  for (const p of held) assert.equal(readyToClose(p, 'closable', quiet(0), now), true, 'ignored while autonomy is off');
-  for (const p of held) assert.equal(readyToClose(p, 'closable', quiet(0, true), now), false);
-  assert.equal(
-    readyToClose(pr({ self_review_state: 'passed', push_after: '2026-11-24T09:00:00Z' }), 'closable', quiet(0, true), now),
-    true,
-  );
+  const failed = pr({ self_review_state: 'failed' });
+  assert.equal(readyToClose(failed, 'closable', quiet(0), now), true, 'ignored while autonomy is off');
+  assert.equal(readyToClose(failed, 'closable', quiet(0, true), now), false);
+  assert.equal(readyToClose(pr({ self_review_state: 'passed' }), 'closable', quiet(0, true), now), true);
 });
 
 test('active days count the days that began after the start, on active days only', () => {
