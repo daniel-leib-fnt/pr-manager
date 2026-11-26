@@ -891,6 +891,9 @@ label select {
 .banner button {
   margin-left: auto;
 }
+.banner .thread-link button {
+  margin-left: 4px;
+}
 
 .card {
   background: var(--surface);

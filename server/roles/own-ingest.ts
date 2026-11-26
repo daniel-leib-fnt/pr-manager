@@ -3,7 +3,7 @@ import type { Db } from '../db.ts';
 import { type GhComment, type GhPrDetail, buildState, failedChecks, prDetail, unansweredThreads, viewer } from '../github.ts';
 import type { Comment, OwnPr } from '../model.ts';
 import { buildRules } from '../settings.ts';
-import { openBatch } from './own-batch.ts';
+import { REOPENED, openBatch } from './own-batch.ts';
 
 const formatThread = (comments: GhComment[]) =>
   comments.map((c) => `@${c.author?.login ?? 'ghost'} (${c.createdAt}):\n${c.body}`).join('\n\n---\n\n');
@@ -18,14 +18,9 @@ export async function ingest(db: Db, pr: OwnPr, me?: string, detail?: GhPrDetail
 
   const reopen = (c: Comment, body: string, lastSeen: string) => {
     db.update('comments', c.id, {
-      state: 'new',
+      ...REOPENED,
       body,
       last_seen_gh_id: lastSeen,
-      proposal: null,
-      skip_reason: null,
-      decision: null,
-      reply_edited: 0,
-      note: null,
     });
     added++;
   };

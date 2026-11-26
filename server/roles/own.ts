@@ -17,8 +17,10 @@ import {
   applyPredecisions,
   checkBatches,
   closeBatch,
+  openBatch,
   pushNow,
   recheckAfterPush,
+  REOPENED,
   remark,
   retrySelfReview,
   submitDecisions,
@@ -184,6 +186,23 @@ export function openThreads(db: Db, pr: OwnPr): OpenThread[] {
   return (JSON.parse(pr.open_threads ?? '[]') as OpenThread[]).filter((t) => !handled.has(t.threadId));
 }
 
+/**
+ * Gives an open thread back to pr-manager: its items that ended without an answer on GitHub are open again, so
+ * the agent handles them like new comments. Only `done` items come back; `gone` ones have no thread any more.
+ */
+export function handBack(db: Db, pr: OwnPr, threadId: string) {
+  if (!openThreads(db, pr).some((t) => t.threadId === threadId)) throw new Error('This thread is not open on GitHub without my reply.');
+  const items = db.comments(pr.id).filter((c) => c.thread_id === threadId && c.state === 'done');
+  if (!items.length) throw new Error('No item of this thread to hand back; answer it on GitHub.');
+  db.transaction(() => {
+    for (const c of items) {
+      db.update('comments', c.id, { ...REOPENED, reply_draft: null, clarify: 0, auto: 0, by_agent: 0, note: 'Handed back by me.' });
+    }
+  });
+  openBatch(db, pr.id, pr.head_sha, { handedBack: true });
+  touchBatch(db, pr.id, true);
+}
+
 /** What one run carries: the comments that were open when it started. */
 interface OwnRun {
   openAtStart: Set<number>;
@@ -263,6 +282,10 @@ export const own: Role<OwnPr, OwnRun> = {
     if (items.some((i) => i.kind === 'comments' && i.payload?.includes('pushed')))
       parts.push(
         'The branch was pushed to from outside pr-manager. Items you triaged before are open again: judge each against the code at HEAD, as the workflow describes for a push.',
+      );
+    if (items.some((i) => i.kind === 'comments' && i.payload?.includes('handedBack')))
+      parts.push(
+        'I handed threads back to you that had ended without an answer on GitHub. They are open items again: handle each one so that it ends with a fix or a reply, and do not dismiss or skip it again.',
       );
     if (kinds.has('answers'))
       parts.push(
@@ -348,6 +371,7 @@ export const own: Role<OwnPr, OwnRun> = {
     'POST followup-review': ({ db, pr }) => {
       if (!recheckAfterPush(db, pr)) throw new Error('No open proposal or question to check again.');
     },
+    'POST hand-back': ({ db, pr, body }) => handBack(db, pr, String((body as { threadId?: string }).threadId)),
     'POST push-now': ({ db, pr }) => pushNow(db, pr),
     'POST retry-review': ({ db, pr }) => retrySelfReview(db, pr),
     'POST nudged': ({ db, pr }) => {

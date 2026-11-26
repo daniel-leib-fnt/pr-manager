@@ -107,9 +107,12 @@ interface Entry {
       @if (pr().openThreads.length) {
         <div class="banner">
           <strong>{{ plural(pr().openThreads.length, 'thread') }} open on GitHub without my reply.</strong>
-          pr-manager no longer handles them; answer or resolve them on GitHub:
+          pr-manager no longer handles them; answer or resolve them on GitHub, or hand them back to the agent:
           @for (t of pr().openThreads; track t.threadId) {
-            <a [href]="t.url" target="_blank" rel="noopener">{{ t.path }} ({{ t.author ?? 'ghost' }}) ↗</a>
+            <span class="thread-link">
+              <a [href]="t.url" target="_blank" rel="noopener">{{ t.path }} ({{ t.author ?? 'ghost' }}) ↗</a>
+              <button class="small" (click)="action.emit({ name: 'hand-back', body: { threadId: t.threadId } })">Hand back</button>
+            </span>
           }
         </div>
       }

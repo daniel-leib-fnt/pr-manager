@@ -23,10 +23,13 @@ export function touchBatch(db: Db, prId: number, mine: boolean) {
 }
 
 /** New items on one of my PRs: the batch starts at `headSha` unless one is open, and the agent gets to work. */
-export function openBatch(db: Db, prId: number, headSha: string) {
+/** What an item loses when it becomes open again, whether new activity or I reopened it. */
+export const REOPENED = { state: 'new', proposal: null, skip_reason: null, decision: null, reply_edited: 0, note: null } as const;
+
+export function openBatch(db: Db, prId: number, headSha: string, payload?: unknown) {
   db.updatePr(prId, { last_event_at: now(), batch_head_sha: (db.pr(prId) as OwnPr).batch_head_sha ?? headSha });
   touchBatch(db, prId, false);
-  db.enqueue(prId, 'comments');
+  db.enqueue(prId, 'comments', payload);
   changed(prId);
 }
 

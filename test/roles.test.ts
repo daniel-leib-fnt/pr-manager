@@ -7,7 +7,7 @@ import type { OwnPr, ReviewPr, WorkKind } from '../server/model.ts';
 import { settleFollowUp, submitAnswers } from '../server/prs.ts';
 import { instruct, roleOf, roles } from '../server/roles/index.ts';
 import { ingest } from '../server/roles/own-ingest.ts';
-import { own } from '../server/roles/own.ts';
+import { handBack, own } from '../server/roles/own.ts';
 import { lastSubmittedReview, review } from '../server/roles/review.ts';
 import { initSettings, saveOverrides } from '../server/settings.ts';
 
@@ -247,6 +247,28 @@ test('a thread I skipped keeps my own PR with me until it is answered or resolve
     ]),
   );
   assert.equal(groupOf(db, ownPr()), 'waiting');
+});
+
+test('a thread I hand back is open for the agent again, and falls back to me when it ends without an answer', async () => {
+  const { db, ownPr } = setup();
+  await ingest(db, ownPr(), 'me', detail([thread('T1', [{ id: 'c1', login: 'alice', body: 'rename this' }])]));
+  const [row] = db.comments(ownPr().id);
+  db.run(`DELETE FROM work_items`);
+  db.update('comments', row.id, { state: 'done' });
+  assert.equal(own.summary(db, ownPr()).openThreads.length, 1);
+  assert.throws(() => handBack(db, ownPr(), 'T2'), /not open/);
+
+  handBack(db, ownPr(), 'T1');
+  assert.equal(db.comment(row.id)!.state, 'new');
+  assert.equal(own.summary(db, ownPr()).openThreads.length, 0);
+  assert.equal(groupOf(db, ownPr()), 'queued');
+  assert.ok(db.workItems(ownPr().id).some((w) => w.kind === 'comments' && w.state === 'queued' && w.payload?.includes('handedBack')));
+
+  // The next ingest leaves the open item alone; ended without an answer again, the thread comes back to me.
+  await ingest(db, ownPr(), 'me', detail([thread('T1', [{ id: 'c1', login: 'alice', body: 'rename this' }])]));
+  assert.equal(db.comments(ownPr().id).length, 1);
+  db.update('comments', row.id, { state: 'done' });
+  assert.equal(own.summary(db, ownPr()).openThreads.length, 1);
 });
 
 test('a review whose build never comes waits for me, until I start it without one', async () => {

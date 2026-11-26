@@ -268,7 +268,7 @@ export interface SummaryFields {
   batch: BatchStatus;
   /**
    * Threads open on GitHub without my reply that nothing in pr-manager handles any more, for example ones I
-   * skipped. They keep the PR with me until they are answered or resolved on GitHub.
+   * skipped. They keep the PR with me until they are answered or resolved on GitHub, or I hand them back (their `done` items become `new` again).
    */
   openThreads: OpenThread[];
   /** Since when the PR waits on others: its last activity on GitHub, or my last follow-up. */
