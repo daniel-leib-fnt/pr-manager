@@ -131,7 +131,8 @@ import { Transcript } from './transcript';
           <ng-container *ngTemplateOutlet="region('bannersLate')" />
           @for (f of openFollowUps(); track f.id) {
             <div class="banner" [class.info]="f.severity === 'info'">
-              <strong>{{ f.severity === 'info' ? 'Note from the agent:' : 'Follow-up from the agent:' }}</strong>
+              <strong>{{ f.severity === 'info' ? 'Note from the agent' : 'Follow-up from the agent' }}</strong>
+              <span class="small">{{ f.created_at | date: 'dd.MM. HH:mm' }}:</span>
               <span class="pre">{{ f.text }}</span>
               <button class="small" (click)="request({ name: 'follow-up-done', body: { id: f.id } })">
                 {{ f.severity === 'info' ? 'Dismiss' : 'Done' }}
