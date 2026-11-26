@@ -58,10 +58,20 @@ async function gitNet(repo: string, cwd: string, args: string[]) {
   return serial(repo, () => gitNetNow(cwd, args));
 }
 
+/** The error text of a failed git command carries the whole command line, and with it the auth header. */
+export const redactToken = (message: string) => message.replace(/(AUTHORIZATION: basic )\S+/gi, '$1***');
+
 async function gitNetNow(cwd: string, args: string[]) {
   const basic = Buffer.from(`x-access-token:${await token()}`).toString('base64');
-  return git(cwd, ['-c', `http.https://github.com/.extraheader=AUTHORIZATION: basic ${basic}`, ...args]);
+  try {
+    return await git(cwd, ['-c', `http.https://github.com/.extraheader=AUTHORIZATION: basic ${basic}`, ...args]);
+  } catch (e) {
+    throw e instanceof Error ? new Error(redactToken(e.message)) : e;
+  }
 }
+
+/** The reason GitHub gave when it refused a push for good (`! [remote rejected] ... (reason)`), or null for any other failure. */
+export const pushRejection = (message: string) => message.match(/\[remote rejected\][^\n]*?\((.+)\)\s*$/m)?.[1] ?? null;
 
 const httpsUrl = (repo: string) => `https://github.com/${repo}.git`;
 
@@ -210,12 +220,19 @@ export async function localChanged(pr: PrBase, path: string): Promise<boolean> {
 }
 
 export async function push(pr: PrBase, path: string, expectedSha: string): Promise<string> {
-  await gitNet(pr.repo, path, [
-    'push',
-    `--force-with-lease=refs/heads/${pr.head_ref}:${expectedSha}`,
-    httpsUrl(pr.repo),
-    `HEAD:refs/heads/${pr.head_ref}`,
-  ]);
+  try {
+    await gitNet(pr.repo, path, [
+      'push',
+      `--force-with-lease=refs/heads/${pr.head_ref}:${expectedSha}`,
+      httpsUrl(pr.repo),
+      `HEAD:refs/heads/${pr.head_ref}`,
+    ]);
+  } catch (e) {
+    // A refusal repeats on every attempt, so it stops the PR instead of failing the same push every poll.
+    const reason = e instanceof Error ? pushRejection(e.message) : null;
+    if (reason) throw new Blocked(`GitHub rejected the push of ${pr.head_ref}: ${reason}. Fix it, then press Retry.`);
+    throw e;
+  }
   await git(path, ['update-ref', remoteHeadRef(pr), 'HEAD']);
   return git(path, ['rev-parse', 'HEAD']);
 }

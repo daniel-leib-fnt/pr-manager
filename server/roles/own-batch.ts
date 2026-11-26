@@ -234,7 +234,13 @@ export async function closeBatch(ctx: { db: Db; pr: OwnPr; ingest: (pr: OwnPr) =
         blocked(`Rebasing onto ${pr.base_ref} fails again at the same commits. Resolve it in ${path}, then press Retry.`);
       return;
     }
-    const newSha = await push(pr, path, pr.batch_head_sha ?? pr.head_sha);
+    let newSha: string;
+    try {
+      newSha = await push(pr, path, pr.batch_head_sha ?? pr.head_sha);
+    } catch (e) {
+      if (e instanceof Blocked) return blocked(e.message);
+      throw e;
+    }
     const ciFixed = db.comments(pr.id).some((c) => c.kind === 'ci' && c.state === 'fixed');
     db.updatePr(pr.id, {
       batch_head_sha: newSha,
