@@ -2,8 +2,14 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
   activeDaysBetween,
+  appendFinalReview,
   batchAutonomy,
   batchStatus,
+  finalReviewBody,
+  finalReviewBullet,
+  finalReviewHeader,
+  finalReviewItems,
+  finalReviewOpen,
   mayDecide,
   readyToClose,
   replyFor,
@@ -214,4 +220,70 @@ test('active days count the days that began after the start, on active days only
   assert.equal(activeDaysBetween(at('2026-11-23T10:00'), at('2026-11-26T09:00'), all), 3);
   assert.equal(activeDaysBetween(at('2026-11-27T16:00'), at('2026-11-30T08:00'), [1, 2, 3, 4, 5]), 1, 'Friday to Monday');
   assert.equal(activeDaysBetween(at('2026-11-27T16:00'), at('2026-11-30T08:00'), []), 3, 'without active days every day counts');
+});
+
+test('the final review lists only pushed changes the agent decided alone', () => {
+  const agent = comment({ id: 1, state: 'fixed', by_agent: 1 });
+  const auto = comment({ id: 2, kind: 'ci', state: 'fixed', auto: 1 });
+  const mine = comment({ id: 3, state: 'fixed' });
+  const reply = comment({ id: 4, state: 'fixed', by_agent: 1, clarify: 1 });
+  const skipped = comment({ id: 5, state: 'skipped', by_agent: 1 });
+  const done = comment({ id: 6, state: 'done', by_agent: 1 });
+  const selfReview = comment({ id: 7, kind: 'self_review', state: 'fixed', by_agent: 1 });
+  assert.deepEqual(
+    finalReviewItems([agent, auto, mine, reply, skipped, done, selfReview]).map((c) => c.id),
+    [1, 2],
+  );
+});
+
+test('a final-review line is one line with its source, change, rating and commit, and mentions nobody', () => {
+  const pr = { url: 'https://github.com/o/r/pull/7' };
+  const sha = 'abcdef0123456789';
+  const c = comment({
+    state: 'fixed',
+    by_agent: 1,
+    author: 'alice',
+    url: 'https://github.com/o/r/pull/7#discussion_r1',
+    proposal: 'Rename the field\nto `name`, ask @bob.',
+    risk: 'contained',
+    confidence: 'medium',
+    reason: 'Stays inside the topic.',
+  });
+  const line = finalReviewBullet(pr, c, sha);
+  assert.ok(!line.includes('\n'));
+  assert.ok(!/@(?=\w)/.test(line), 'no mention that notifies someone');
+  assert.ok(line.startsWith("* [alice's comment](https://github.com/o/r/pull/7#discussion_r1): Rename the field to `name`, ask"));
+  assert.ok(
+    line.endsWith(
+      '(contained, medium confidence: Stays inside the topic.) [abcdef0](https://github.com/o/r/pull/7/commits/abcdef0123456789)',
+    ),
+  );
+  const ci = finalReviewBullet(pr, comment({ kind: 'ci', state: 'fixed', auto: 1, author: 'ci', note: '[]' }), sha);
+  assert.ok(ci.startsWith('* CI failure: fixed directly (local) '), ci);
+});
+
+test('a final review is open while its first line is an unticked box of mine', () => {
+  const body = finalReviewBody('me', ['* a']);
+  assert.equal(body, '* [ ] Final review by @me\n\n* a');
+  assert.equal(finalReviewHeader('me'), '* [ ] Final review by @me');
+  assert.equal(finalReviewOpen(body, 'me'), true);
+  assert.equal(finalReviewOpen(body.replace('[ ]', '[x]'), 'me'), false, 'ticked');
+  assert.equal(finalReviewOpen(body.replaceAll('\n', '\r\n'), 'me'), true, 'GitHub may hand the body back with CRLF');
+  assert.equal(finalReviewOpen(body, 'bob'), false, 'not mine');
+  assert.equal(finalReviewOpen(`Intro\n${body}`, 'me'), false, 'edited so that the box is no longer the first line');
+  assert.equal(finalReviewOpen('', 'me'), false);
+});
+
+test('more lines are added to an open final review once, however often a batch is reported', () => {
+  const body = finalReviewBody('me', ['* a']);
+  assert.equal(appendFinalReview(body, ['* a']), null, 'nothing new');
+  const next = appendFinalReview(body, ['* a', '* b'])!;
+  assert.equal(next, '* [ ] Final review by @me\n\n* a\n* b');
+  assert.equal(appendFinalReview(next, ['* a', '* b']), null);
+  assert.equal(
+    appendFinalReview(`${next}\n\n`, ['* c']),
+    '* [ ] Final review by @me\n\n* a\n* b\n* c',
+    'trailing blank lines do not pile up',
+  );
+  assert.equal(appendFinalReview(next.replaceAll('\n', '\r\n'), ['* b']), null, 'CRLF does not hide a line that is there');
 });

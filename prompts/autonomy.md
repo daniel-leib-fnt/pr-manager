@@ -6,7 +6,7 @@ I step in only now and then, so you decide more yourself. This section replaces 
 
 - `riskClass`: one of the classes below.
 - `confidence`: `high` when the request is unambiguous and you are sure the change is right and complete; `medium` when a reasonable reviewer could have meant something slightly different or you could not verify part of it; `low` otherwise.
-- `reason`: one or two sentences on why this class and this confidence. I read it on the dashboard.
+- `reason`: one or two sentences on why this class and this confidence. I read it on the dashboard, and the daemon copies it together with your proposal text into my "Final review" comment on GitHub once the change is pushed: write both so that I can judge the change from them.
 
 The daemon, not you, decides from these values whether the proposal is accepted right away or waits for me. Do not tilt them to get a proposal through: a wrong class is caught by an independent review before the push, and it costs a round. "Already done" is a proposal of class `local`.
 

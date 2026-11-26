@@ -87,6 +87,13 @@ interface Entry {
     </ng-template>
 
     <ng-template #bannersLate>
+      @if (pr().final_review_id) {
+        <div class="banner">
+          <strong>Final review open.</strong>
+          Changes the agent decided alone wait for my tick on GitHub:
+          <a [href]="pr().url + '#issuecomment-' + pr().final_review_id" target="_blank" rel="noopener">Final review ↗</a>
+        </div>
+      }
       @if (pr().nudge && pr().waitingSince) {
         <div class="banner">
           <strong>No activity for {{ age(pr().waitingSince!) }}.</strong>

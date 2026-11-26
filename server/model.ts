@@ -59,6 +59,10 @@ export interface OwnFields {
   open_threads: string | null;
   /** When I last followed up on a PR that waited too long; the wait counts from here or the last GitHub activity. */
   nudged_at: string | null;
+  /** GitHub id of my open "Final review" comment on this PR; null when none is open. */
+  final_review_id: number | null;
+  /** The head `closeBatch` pushed for the batch whose pushed changes are not yet reported; null otherwise. */
+  pushed_sha: string | null;
 }
 
 /** What only a PR I review has: the review draft and what I submitted. Table `review_prs`. */

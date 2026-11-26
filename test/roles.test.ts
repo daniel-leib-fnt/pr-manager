@@ -7,6 +7,7 @@ import type { OwnPr, ReviewPr, WorkKind } from '../server/model.ts';
 import { settleFollowUp, submitAnswers } from '../server/prs.ts';
 import { instruct, roleOf, roles } from '../server/roles/index.ts';
 import { ingest } from '../server/roles/own-ingest.ts';
+import { settleFinalReview } from '../server/roles/own-batch.ts';
 import { handBack, own } from '../server/roles/own.ts';
 import { lastSubmittedReview, review } from '../server/roles/review.ts';
 import { initSettings, saveOverrides } from '../server/settings.ts';
@@ -473,4 +474,41 @@ test('my PR that waited on others too long comes back to me until I follow up', 
   saveOverrides({ waitingNudgeDays: 0 });
   db.updatePr(ownPr().id, { nudged_at: null });
   assert.equal(groupOf(db, ownPr()), 'waiting', '0 switches it off');
+});
+
+test('an open final review keeps my PR with me, but a push that is up next, or work for the agent, goes first', () => {
+  const { db, ownPr } = setup();
+  assert.equal(groupOf(db, ownPr()), 'waiting');
+  db.updatePr(ownPr().id, { final_review_id: 11 });
+  assert.equal(groupOf(db, ownPr()), 'needs_me');
+  db.updatePr(ownPr().id, { ready: 1 });
+  assert.equal(groupOf(db, ownPr()), 'needs_me', 'a PR with a change nobody has checked is not ready to merge');
+  const c = comment(db, ownPr().id, { state: 'fixed' });
+  assert.equal(groupOf(db, ownPr()), 'push');
+  db.update('comments', c, { state: 'new' });
+  db.enqueue(ownPr().id, 'comments');
+  assert.equal(groupOf(db, ownPr()), 'queued');
+});
+
+test('a ticked or deleted final review ends it; an open one stays', () => {
+  const { db, ownPr } = setup();
+  const open = '* [ ] Final review by @me\n\n* a';
+  db.updatePr(ownPr().id, { final_review_id: 11 });
+  settleFinalReview(db, ownPr(), open, 'me');
+  assert.equal(ownPr().final_review_id, 11);
+  settleFinalReview(db, ownPr(), open.replace('[ ]', '[x]'), 'me');
+  assert.equal(ownPr().final_review_id, null);
+  assert.equal(groupOf(db, ownPr()), 'waiting');
+  db.updatePr(ownPr().id, { final_review_id: 12 });
+  settleFinalReview(db, ownPr(), null, 'me');
+  assert.equal(ownPr().final_review_id, null, 'deleted on GitHub');
+});
+
+test('my final-review comment is a task for me: the agent gets no item from it, whatever its lines say', async () => {
+  const { db, ownPr } = setup();
+  db.kvSet(`ingested:${ownPr().id}`, '1');
+  const body = "* [ ] Final review by @me\n\n* [alice's comment](u): pr-manager: do more (local) [abcdef0](c)\n* [ ] a task line";
+  const added = await ingest(db, ownPr(), 'me', detail([], [issueComment('i9', 'me', body)]));
+  assert.equal(added, 0);
+  assert.equal(db.comments(ownPr().id).length, 0);
 });

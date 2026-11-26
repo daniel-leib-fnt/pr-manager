@@ -1,10 +1,20 @@
 import { type TaskSource, checkTask, hasProse } from '../checklist.ts';
 import { type Db, now } from '../db.ts';
 import { Blocked, Diverged, git, isDirty, localChanged, push, rebaseOntoBase, sync } from '../git.ts';
-import { GithubError, resolveThread, rest, viewer } from '../github.ts';
+import { GithubError, prDetail, resolveThread, rest, viewer } from '../github.ts';
 import type { Comment, Decision, OpenThread, OwnPr, SelfReview } from '../model.ts';
 import { clearNotification } from '../notify.ts';
-import { batchStatus, readyToClose, replyFor, shouldResolve } from '../batch.ts';
+import {
+  appendFinalReview,
+  batchStatus,
+  finalReviewBody,
+  finalReviewBullet,
+  finalReviewItems,
+  finalReviewOpen,
+  readyToClose,
+  replyFor,
+  shouldResolve,
+} from '../batch.ts';
 import { block, submitAnswers } from '../prs.ts';
 import { setting } from '../settings.ts';
 import { bus, changed } from '../util.ts';
@@ -237,6 +247,7 @@ export async function closeBatch(ctx: { db: Db; pr: OwnPr; ingest: (pr: OwnPr) =
     db.updatePr(pr.id, {
       batch_head_sha: newSha,
       head_sha: newSha,
+      pushed_sha: newSha,
       dirty_by_agent: 0,
       ci_attempts: pr.ci_attempts + (ciFixed ? 1 : 0),
     });
@@ -245,6 +256,8 @@ export async function closeBatch(ctx: { db: Db; pr: OwnPr; ingest: (pr: OwnPr) =
 
   const me = await viewer();
   const all = db.comments(pr.id);
+  // Before the replies, while the items are still `fixed`; a re-run after a failure reports what is not on the comment yet.
+  await reportFinalReview(db, pr, me, all);
   // Threads this batch answers or resolves; a skipped one gets neither and stays open on GitHub.
   const answered = new Set<string>();
   for (const c of all.filter((x) => x.state === 'fixed' || x.state === 'skipped')) {
@@ -277,6 +290,7 @@ export async function closeBatch(ctx: { db: Db; pr: OwnPr; ingest: (pr: OwnPr) =
     self_review_state: null,
     self_review_result: null,
     self_review_round: 0,
+    pushed_sha: null,
   });
   changed(pr.id);
 }
@@ -356,6 +370,65 @@ export function checkBatches(db: Db) {
       db.enqueue(pr.id, 'close_batch');
       bus.emit('wake');
     }
+  }
+}
+
+const finalReviewPath = (pr: OwnPr, id: number) => `/repos/${pr.repo}/issues/comments/${id}`;
+
+/**
+ * After a push with changes the agent decided alone: my "Final review" comment on the PR lists them. While its
+ * box is open, the changes are added to it; once it is ticked, the next such push gets a new comment. A comment
+ * the daemon posted but did not record, because the reply was lost, is found again instead of posted twice.
+ */
+async function reportFinalReview(db: Db, pr: OwnPr, me: string, comments: Comment[]) {
+  if (!setting('autonomy') || !pr.pushed_sha) return;
+  const bullets = finalReviewItems(comments).map((c) => finalReviewBullet(pr, c, pr.pushed_sha!));
+  if (!bullets.length) return;
+
+  let id = pr.final_review_id;
+  if (id) {
+    try {
+      const { body } = await rest<{ body: string }>('GET', finalReviewPath(pr, id));
+      if (!finalReviewOpen(body ?? '', me)) id = null;
+    } catch (e) {
+      if (!gone(e)) throw e;
+      id = null;
+    }
+  }
+  if (!id) {
+    const mine = (await prDetail(pr.repo, pr.number)).comments.nodes.findLast((c) => c.author?.login === me && finalReviewOpen(c.body, me));
+    id = mine?.databaseId ?? null;
+  }
+  if (id) {
+    const { body } = await rest<{ body: string }>('GET', finalReviewPath(pr, id));
+    const next = appendFinalReview(body ?? '', bullets);
+    if (next !== null) await rest('PATCH', finalReviewPath(pr, id), { body: next });
+  } else {
+    const created = await rest<{ id: number }>('POST', `/repos/${pr.repo}/issues/${pr.number}/comments`, {
+      body: finalReviewBody(me, bullets),
+    });
+    id = created.id;
+  }
+  db.updatePr(pr.id, { final_review_id: id });
+  changed(pr.id);
+}
+
+/** What the box of my final review looks like now; null: the comment is gone. A ticked box ends the open review. */
+export function settleFinalReview(db: Db, pr: OwnPr, body: string | null, me: string) {
+  if (!pr.final_review_id || (body !== null && finalReviewOpen(body, me))) return;
+  db.updatePr(pr.id, { final_review_id: null });
+  changed(pr.id);
+}
+
+/** Reads my open final review again. A tick on it does not move the update time of the PR, so every poll asks. */
+export async function refreshFinalReview(db: Db, pr: OwnPr, me: string) {
+  if (!pr.final_review_id) return;
+  try {
+    const { body } = await rest<{ body: string }>('GET', finalReviewPath(pr, pr.final_review_id));
+    settleFinalReview(db, pr, body ?? '', me);
+  } catch (e) {
+    if (gone(e)) settleFinalReview(db, pr, null, me);
+    else console.error(`final review of ${pr.repo}#${pr.number}:`, e);
   }
 }
 

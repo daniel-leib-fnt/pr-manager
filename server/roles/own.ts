@@ -20,6 +20,7 @@ import {
   openBatch,
   pushAnyway,
   recheckAfterPush,
+  refreshFinalReview,
   REOPENED,
   remark,
   retrySelfReview,
@@ -229,6 +230,8 @@ export const own: Role<OwnPr, OwnRun> = {
     // Losing the ready state means something changed on GitHub: look at the PR again, even if its update time did not move.
     // A PR whose open threads were never read is read once, too.
     if (isChanged || lostReady || ciUnseen || pr.open_threads === null) await ingest(db, pr, me);
+    // Ticking my final review does not move the update time of the PR, so it is read on every poll.
+    await refreshFinalReview(db, db.pr(pr.id) as OwnPr, me);
     // The daemon records the head it pushes itself, so a head that moved here was pushed by someone else.
     if (prev.head_sha !== gh.headRefOid) recheckAfterPush(db, pr);
     // A moving base does not change the PR's update time, so conflicts are checked on every poll.
@@ -350,6 +353,8 @@ export const own: Role<OwnPr, OwnRun> = {
     const batch = batchOf(db, pr);
     // Fixes waiting out the quiet time or being pushed right now: the push is up next, not someone else.
     if (batch === 'closable') return 'push';
+    // My final review is a task for me that the agent cannot do: until I tick it, the PR is not waiting on others.
+    if (pr.final_review_id) return 'needs_me';
     if (openThreads(db, pr).length) return 'needs_me';
     if (pr.ready && batch === 'none') return 'ready';
     return nudgeDue(pr) ? 'needs_me' : 'waiting';

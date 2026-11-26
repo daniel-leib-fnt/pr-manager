@@ -1,3 +1,4 @@
+import { parseTasks } from './checklist.ts';
 import type { BatchStatus, Comment, Confidence, OwnPr, Question, RiskClass, SelfReviewResult, WorkItem } from './model.ts';
 
 /**
@@ -124,4 +125,54 @@ export function activeDaysBetween(start: Date, end: Date, days: number[]): numbe
     t.setDate(t.getDate() + 1);
   }
   return count;
+}
+
+// --- The final review: one comment of mine on the PR for the changes the agent decided alone ---
+
+/** The first line of the comment: a task for me that the agent never gets as an item. */
+export const finalReviewHeader = (login: string) => `* [ ] Final review by @${login}`;
+
+/** The changes of a pushed batch that the agent decided alone; self-review corrections only improve these. */
+export const finalReviewItems = (comments: Comment[]): Comment[] =>
+  comments.filter((c) => c.state === 'fixed' && !c.clarify && (c.by_agent || c.auto) && c.kind !== 'self_review');
+
+const oneLine = (text: string, max: number) => {
+  const t = text.replace(/\s+/g, ' ').trim();
+  return t.length > max ? `${t.slice(0, max - 1)}…` : t;
+};
+
+/** A mention inside the text would notify someone about a comment that is none of their business. */
+const noMention = (text: string) => text.replace(/@(?=\w)/g, '@\u200b');
+
+/** One line for one change: where it came from, what changed, how the agent rated it, and the commit. */
+export function finalReviewBullet(pr: Pick<OwnPr, 'url'>, c: Comment, sha: string): string {
+  const label =
+    c.kind === 'ci'
+      ? 'CI failure'
+      : c.kind === 'conflict'
+        ? 'Merge conflict'
+        : c.kind === 'instruction'
+          ? 'Instruction'
+          : `${c.author ?? 'ghost'}'s comment`;
+  const source = c.url ? `[${label}](${c.url})` : label;
+  const what = noMention(oneLine(c.proposal ?? c.reply_draft ?? 'fixed directly', 300));
+  const rating = `${c.risk ?? 'local'}${c.confidence ? `, ${c.confidence} confidence` : ''}`;
+  const reason = c.reason ? `: ${noMention(oneLine(c.reason, 300))}` : '';
+  return `* ${source}: ${what} (${rating}${reason}) [${sha.slice(0, 7)}](${pr.url}/commits/${sha})`;
+}
+
+/** The text of a new final-review comment. */
+export const finalReviewBody = (login: string, bullets: string[]) => `${finalReviewHeader(login)}\n\n${bullets.join('\n')}`;
+
+/** Whether the comment is my final review with its box still open. A ticked box, or an edited-away line, is done. */
+export function finalReviewOpen(body: string, login: string): boolean {
+  const first = parseTasks(body)[0];
+  return !!first && first.line === 0 && !first.checked && first.text === `Final review by @${login}`;
+}
+
+/** The body with the bullets it does not hold yet added at the end; null when it has them all, so a re-run adds nothing twice. */
+export function appendFinalReview(body: string, bullets: string[]): string | null {
+  const lines = new Set(body.split('\n').map((l) => l.trimEnd()));
+  const fresh = bullets.filter((b) => !lines.has(b));
+  return fresh.length ? `${body.replace(/\s+$/, '')}\n${fresh.join('\n')}` : null;
 }
