@@ -163,12 +163,21 @@ const thread = (id: string, comments: { id: string; login: string; body: string 
   },
 });
 
-const detail = (threads: ReturnType<typeof thread>[]) =>
+const issueComment = (id: string, login: string, body: string) => ({
+  id,
+  databaseId: 100,
+  author: { login },
+  body,
+  createdAt: '2026-11-09T00:00:00Z',
+  url: `u/${id}`,
+});
+
+const detail = (threads: ReturnType<typeof thread>[], comments: ReturnType<typeof issueComment>[] = []) =>
   ({
     headRefOid: 'a1',
     commits: { nodes: [{ commit: { oid: 'a1', statusCheckRollup: null } }] },
     reviewThreads: { nodes: threads },
-    comments: { nodes: [] },
+    comments: { nodes: comments },
     reviews: { nodes: [] },
   }) as unknown as GhPrDetail;
 
@@ -269,6 +278,104 @@ test('a thread I hand back is open for the agent again, and falls back to me whe
   assert.equal(db.comments(ownPr().id).length, 1);
   db.update('comments', row.id, { state: 'done' });
   assert.equal(own.summary(db, ownPr()).openThreads.length, 1);
+});
+
+test('my comment that starts with the prefix is an order; one without it, without text, or from someone else is not', async () => {
+  const { db, ownPr } = setup();
+  db.kvSet(`ingested:${ownPr().id}`, '1');
+  const order = issueComment('i1', 'me', '  PR-Manager: do it');
+  await ingest(
+    db,
+    ownPr(),
+    'me',
+    detail(
+      [],
+      [
+        order,
+        issueComment('i2', 'me', 'just a note'),
+        issueComment('i3', 'me', 'pr-manager:  '),
+        issueComment('i4', 'alice', 'pr-manager: no'),
+      ],
+    ),
+  );
+  const rows = db.comments(ownPr().id);
+  assert.deepEqual(
+    rows.map((c) => [c.kind, c.state, c.body]),
+    [
+      ['instruction', 'accepted', 'do it'],
+      ['issue_comment', 'new', 'pr-manager: no'],
+    ],
+  );
+  assert.ok(db.workItems(ownPr().id).some((w) => w.kind === 'comments' && w.state === 'queued'));
+  // The same comment does not run twice.
+  await ingest(db, ownPr(), 'me', detail([], [order]));
+  assert.equal(db.comments(ownPr().id).length, 2);
+});
+
+test('an order from before pr-manager first saw the PR does not run', async () => {
+  const { db, ownPr } = setup();
+  await ingest(db, ownPr(), 'me', detail([], [issueComment('i1', 'me', 'pr-manager: old')]));
+  assert.deepEqual(
+    db.comments(ownPr().id).map((c) => [c.body, c.state]),
+    [['old', 'done']],
+  );
+  await ingest(db, ownPr(), 'me', detail([], [issueComment('i1', 'me', 'pr-manager: old'), issueComment('i2', 'me', 'pr-manager: new')]));
+  assert.deepEqual(
+    db.comments(ownPr().id).map((c) => [c.body, c.state]),
+    [
+      ['old', 'done'],
+      ['new', 'accepted'],
+    ],
+  );
+});
+
+test('my order in a review thread is my accepted decision on it', async () => {
+  const { db, ownPr } = setup();
+  await ingest(db, ownPr(), 'me', detail([thread('T1', [{ id: 'c1', login: 'alice', body: 'rename this' }])]));
+  const [row] = db.comments(ownPr().id);
+  assert.equal(row.state, 'new');
+  const ordered = thread('T1', [
+    { id: 'c1', login: 'alice', body: 'rename this' },
+    { id: 'c2', login: 'me', body: 'pr-manager: call it foo' },
+  ]);
+  await ingest(db, ownPr(), 'me', detail([ordered]));
+  const taken = db.comment(row.id)!;
+  assert.deepEqual([taken.state, taken.decision, taken.proposal], ['accepted', 'accept', 'call it foo']);
+  assert.equal(own.summary(db, ownPr()).openThreads.length, 0);
+
+  // Someone else writes after my order: it is a new reply again, not an order.
+  db.update('comments', row.id, { state: 'done' });
+  await ingest(
+    db,
+    ownPr(),
+    'me',
+    detail([
+      thread('T1', [
+        ...ordered.comments.nodes.map((n) => ({ id: n.id, login: n.author.login, body: n.body })),
+        { id: 'c3', login: 'alice', body: 'and more' },
+      ]),
+    ]),
+  );
+  assert.equal(db.comment(row.id)!.state, 'new');
+});
+
+test('an order that ends a thread without a row creates the row, in the first round too, unless the thread is resolved', async () => {
+  const { db, ownPr } = setup();
+  const t = (id: string, resolved: boolean) =>
+    thread(
+      id,
+      [
+        { id: `${id}a`, login: 'alice', body: 'x' },
+        { id: `${id}b`, login: 'me', body: 'pr-manager: fix it' },
+      ],
+      resolved,
+    );
+  await ingest(db, ownPr(), 'me', detail([t('T1', false), t('T2', true)]));
+  const rows = db.comments(ownPr().id);
+  assert.deepEqual(
+    rows.map((c) => [c.thread_id, c.state, c.proposal]),
+    [['T1', 'accepted', 'fix it']],
+  );
 });
 
 test('a review whose build never comes waits for me, until I start it without one', async () => {

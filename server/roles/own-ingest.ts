@@ -3,10 +3,17 @@ import type { Db } from '../db.ts';
 import { type GhComment, type GhPrDetail, buildState, failedChecks, prDetail, unansweredThreads, viewer } from '../github.ts';
 import type { Comment, OwnPr } from '../model.ts';
 import { buildRules } from '../settings.ts';
-import { REOPENED, openBatch } from './own-batch.ts';
+import { REOPENED, openBatch, touchBatch } from './own-batch.ts';
 
 const formatThread = (comments: GhComment[]) =>
   comments.map((c) => `@${c.author?.login ?? 'ghost'} (${c.createdAt}):\n${c.body}`).join('\n\n---\n\n');
+
+/** An order from me on GitHub: a comment of mine that starts with this. It is no `@` mention, so nobody is notified. */
+const ORDER = /^\s*pr-manager:\s*/i;
+
+/** The text of an order in a comment of mine, or null when the comment is none (or has no text after the prefix). */
+const orderText = (c: Pick<GhComment, 'author' | 'body'>, me: string) =>
+  c.author?.login === me && ORDER.test(c.body) ? c.body.replace(ORDER, '').trim() || null : null;
 
 /** Turns new GitHub activity on one of my PRs into comment rows and a `comments` work item. */
 export async function ingest(db: Db, pr: OwnPr, me?: string, detail?: GhPrDetail): Promise<number> {
@@ -15,6 +22,7 @@ export async function ingest(db: Db, pr: OwnPr, me?: string, detail?: GhPrDetail
   const existing = new Map(db.comments(pr.id).map((c) => [c.gh_key, c]));
   const firstIngest = !db.kvGet(`ingested:${pr.id}`);
   let added = 0;
+  let ordered = false;
 
   const reopen = (c: Comment, body: string, lastSeen: string) => {
     db.update('comments', c.id, {
@@ -24,6 +32,21 @@ export async function ingest(db: Db, pr: OwnPr, me?: string, detail?: GhPrDetail
     });
     added++;
   };
+
+  // My order in a thread is my decision on it: accepted, with my text as the version to implement.
+  const ordering = (cs: GhComment[], text: string) => ({
+    ...REOPENED,
+    state: 'accepted' as const,
+    decision: 'accept' as const,
+    proposal: text,
+    body: formatThread(cs),
+    last_seen_gh_id: cs.at(-1)!.id,
+    url: cs.at(-1)!.url,
+    reply_draft: null,
+    clarify: 0,
+    auto: 0,
+    by_agent: 0,
+  });
 
   // Where a thread comment points to; a push moves the line or makes the thread outdated, so rows follow along.
   const anchor = (t: (typeof d.reviewThreads.nodes)[number], hunk: string | null) => ({
@@ -44,7 +67,24 @@ export async function ingest(db: Db, pr: OwnPr, me?: string, detail?: GhPrDetail
     const c = existing.get(key);
     if (c) reanchor(c, anchor(t, cs[0].diffHunk));
     if (!c) {
-      if (t.isResolved || last.author?.login === me) continue;
+      if (t.isResolved) continue;
+      const order = orderText(last, me);
+      if (order !== null) {
+        db.insert('comments', {
+          pr_id: pr.id,
+          kind: 'thread',
+          gh_key: key,
+          thread_id: t.id,
+          reply_to_db_id: cs[0].databaseId,
+          author: cs[0].author?.login ?? null,
+          ...anchor(t, cs[0].diffHunk),
+          ...ordering(cs, order),
+        });
+        added++;
+        ordered = true;
+        continue;
+      }
+      if (last.author?.login === me) continue;
       // Checklist lines become items of their own (below); a thread row is only needed for plain text.
       const lastMine = cs.findLastIndex((x) => x.author?.login === me);
       if (cs.slice(lastMine + 1).every((x) => hasTasks(x.body))) continue;
@@ -63,8 +103,16 @@ export async function ingest(db: Db, pr: OwnPr, me?: string, detail?: GhPrDetail
       added++;
     } else if (last.id !== c.last_seen_gh_id) {
       const idx = cs.findIndex((x) => x.id === c.last_seen_gh_id);
-      const fresh = cs.slice(idx + 1).filter((x) => x.author?.login !== me && !hasTasks(x.body));
-      if (fresh.length === 0) {
+      const unseen = cs.slice(idx + 1);
+      const fresh = unseen.filter((x) => x.author?.login !== me && !hasTasks(x.body));
+      // My latest order counts unless someone else wrote after it.
+      const orderAt = unseen.findLastIndex((x) => orderText(x, me) !== null);
+      const standing = orderAt >= 0 && unseen.slice(orderAt + 1).every((x) => x.author?.login === me || hasTasks(x.body));
+      if (standing) {
+        db.update('comments', c.id, ordering(cs, orderText(unseen[orderAt], me)!));
+        added++;
+        ordered = true;
+      } else if (fresh.length === 0) {
         db.update('comments', c.id, { last_seen_gh_id: last.id });
       } else if (c.state === 'new' || c.state === 'accepted') {
         db.update('comments', c.id, { body: formatThread(cs), last_seen_gh_id: last.id, url: last.url });
@@ -81,7 +129,28 @@ export async function ingest(db: Db, pr: OwnPr, me?: string, detail?: GhPrDetail
     ...d.reviews.nodes.filter((r) => r.body.trim()).map((c) => ({ key: `review:${c.id}`, kind: 'review_body' as const, c })),
   ];
   for (const { key, kind, c } of flat) {
-    if (c.author?.login === me || existing.has(key) || hasTasks(c.body)) continue;
+    if (c.author?.login === me) {
+      // An order from before this PR was first seen may have run already: keep it as a done row so no later poll runs it.
+      const order = orderText(c, me);
+      if (order !== null && !existing.has(key)) {
+        const old = { state: 'done' as const, note: 'Written before pr-manager first saw this PR.' };
+        db.insert('comments', {
+          pr_id: pr.id,
+          kind: 'instruction',
+          gh_key: key,
+          author: 'me',
+          body: order,
+          url: c.url,
+          ...(firstIngest ? old : { state: 'accepted' }),
+        });
+        if (!firstIngest) {
+          added++;
+          ordered = true;
+        }
+      }
+      continue;
+    }
+    if (existing.has(key) || hasTasks(c.body)) continue;
     if (firstIngest && c.createdAt <= myLast) continue;
     db.insert('comments', { pr_id: pr.id, kind, gh_key: key, author: c.author?.login ?? null, body: c.body, url: c.url });
     added++;
@@ -155,5 +224,7 @@ export async function ingest(db: Db, pr: OwnPr, me?: string, detail?: GhPrDetail
   db.kvSet(`ingested:${pr.id}`, '1');
   db.updatePr(pr.id, { open_threads: JSON.stringify(unansweredThreads(d, me)) });
   if (added) openBatch(db, pr.id, d.headRefOid);
+  // Like an instruction from the dashboard, an order is new work of mine: a failed self-review starts over.
+  if (ordered) touchBatch(db, pr.id, true);
   return added;
 }
