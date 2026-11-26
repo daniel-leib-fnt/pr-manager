@@ -8,8 +8,8 @@ import { REOPENED, openBatch, touchBatch } from './own-batch.ts';
 const formatThread = (comments: GhComment[]) =>
   comments.map((c) => `@${c.author?.login ?? 'ghost'} (${c.createdAt}):\n${c.body}`).join('\n\n---\n\n');
 
-/** An order from me on GitHub: a comment of mine that starts with this. It is no `@` mention, so nobody is notified. */
-const ORDER = /^\s*pr-manager:\s*/i;
+/** An order from me on GitHub: a comment of mine that starts with this. A leading `@` is allowed; the plain form is no mention, so nobody is notified. */
+const ORDER = /^\s*@?pr-manager:\s*/i;
 
 /** The text of an order in a comment of mine, or null when the comment is none (or has no text after the prefix). */
 const orderText = (c: Pick<GhComment, 'author' | 'body'>, me: string) =>

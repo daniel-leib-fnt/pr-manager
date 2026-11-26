@@ -295,6 +295,7 @@ test('my comment that starts with the prefix is an order; one without it, withou
         issueComment('i2', 'me', 'just a note'),
         issueComment('i3', 'me', 'pr-manager:  '),
         issueComment('i4', 'alice', 'pr-manager: no'),
+        issueComment('i5', 'me', '@pr-manager: with at'),
       ],
     ),
   );
@@ -304,12 +305,13 @@ test('my comment that starts with the prefix is an order; one without it, withou
     [
       ['instruction', 'accepted', 'do it'],
       ['issue_comment', 'new', 'pr-manager: no'],
+      ['instruction', 'accepted', 'with at'],
     ],
   );
   assert.ok(db.workItems(ownPr().id).some((w) => w.kind === 'comments' && w.state === 'queued'));
   // The same comment does not run twice.
   await ingest(db, ownPr(), 'me', detail([], [order]));
-  assert.equal(db.comments(ownPr().id).length, 2);
+  assert.equal(db.comments(ownPr().id).length, 3);
 });
 
 test('an order from before pr-manager first saw the PR does not run', async () => {
