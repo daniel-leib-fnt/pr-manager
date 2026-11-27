@@ -49,6 +49,47 @@ import { Component, input, output } from '@angular/core';
     }
     <span class="end"><ng-content /></span>
   `,
+  styles: `
+    .fold {
+      width: 24px;
+      height: 24px;
+      padding: 0;
+      border: 0;
+      background: none;
+      color: var(--muted);
+    }
+    .num {
+      display: inline-flex;
+      width: 22px;
+      height: 22px;
+      flex: none;
+      border-radius: 50%;
+      align-items: center;
+      justify-content: center;
+      background: var(--navy);
+      color: #fff;
+      font-size: 12px;
+      font-weight: 700;
+    }
+    @media (prefers-color-scheme: dark) {
+      .num {
+        background: var(--primary-500);
+      }
+    }
+    /* Long paths are cut at the start, so the file name and line stay visible. */
+    .path {
+      flex: 0 1 auto;
+      min-width: 0;
+      overflow: hidden;
+      white-space: nowrap;
+      text-overflow: ellipsis;
+      direction: rtl;
+      text-align: left;
+      font-family: var(--mono);
+      font-size: 12px;
+      color: var(--text);
+    }
+  `,
 })
 export class ItemHead {
   /** Whether the card is unfolded; `null` for a card that does not fold. */

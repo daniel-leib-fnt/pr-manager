@@ -50,6 +50,11 @@ import { type ActionRequest, type NeedsItem, plural } from '../pr-view';
       <div class="row-item"><span class="muted">Nothing waits for me.</span></div>
     }
   `,
+  styles: `
+    :host {
+      display: block;
+    }
+  `,
 })
 export class NeedsMe {
   readonly items = input.required<NeedsItem[]>();

@@ -35,6 +35,31 @@ import { type PushInfo, WORK_LABEL, stamp } from '../pr-view';
       </dl>
     }
   `,
+  styles: `
+    .details {
+      display: grid;
+      grid-template-columns: 84px minmax(0, 1fr);
+      gap: 6px 12px;
+      margin: 0;
+      font-size: 13px;
+    }
+    .details dt {
+      color: var(--muted);
+    }
+    .details dd {
+      margin: 0;
+      min-width: 0;
+      overflow-wrap: anywhere;
+    }
+    .details + .details {
+      padding-top: 12px;
+      border-top: 1px solid var(--border);
+    }
+    /* keeps the 12px that the global .card > h2 + * rule gives the first list, which margin: 0 above would override */
+    h2 + .details {
+      margin-top: 12px;
+    }
+  `,
 })
 export class DetailsPanel {
   readonly pr = input.required<Pr>();

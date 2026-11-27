@@ -12,7 +12,6 @@ export interface Message {
 @Component({
   selector: 'app-conversation',
   imports: [DatePipe],
-  host: { class: 'conversation' },
   template: `
     @for (m of messages(); track $index) {
       <div class="bubble">
@@ -27,6 +26,42 @@ export interface Message {
           <p class="bubble-text">{{ m.text }}</p>
         </div>
       </div>
+    }
+  `,
+  styles: `
+    :host {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+    .bubble {
+      display: flex;
+      gap: 10px;
+      align-items: flex-start;
+    }
+    .avatar {
+      width: 28px;
+      height: 28px;
+      flex: none;
+      border-radius: 50%;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      background: var(--chip-bg);
+      color: var(--muted);
+      font: 700 11px/1 var(--sans);
+      text-transform: uppercase;
+    }
+    .bubble-body {
+      min-width: 0;
+      flex: 1;
+    }
+    .bubble-meta {
+      font-size: 12px;
+      color: var(--muted);
+    }
+    .bubble-meta strong {
+      color: var(--text);
     }
   `,
 })
