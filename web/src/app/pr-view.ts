@@ -1,5 +1,6 @@
+import { formatDate } from '@angular/common';
 import type { Signal, TemplateRef } from '@angular/core';
-import type { Pr } from './api';
+import type { Pr, WorkItem } from './api';
 
 export type Action = 'accept' | 'reject' | 'reply' | 'skip';
 
@@ -64,25 +65,83 @@ export interface ActionRequest {
   done?: () => void;
 }
 
+/** One tile of the status strip on the Overview tab. It opens a tab of the page or a page on GitHub. */
+export interface Tile {
+  label: string;
+  value: string;
+  sub?: string;
+  /** A dot before the value. */
+  dot?: 'warn' | 'info' | 'bad' | 'idle';
+  pulse?: boolean;
+  /** `check_state` of the PR: shows the build icon before the value. */
+  ci?: string | null;
+  tab?: string;
+  href?: string;
+}
+
+export interface NeedsAction {
+  label: string;
+  primary?: boolean;
+  /** Exactly one of these three. */
+  request?: ActionRequest;
+  tab?: string;
+  href?: string;
+}
+
+/** One entry of the "Needs me" card. */
+export interface NeedsItem {
+  key: string;
+  title: string;
+  /** ISO time shown after the title. */
+  at?: string | null;
+  /** Full text, kept with its line breaks. */
+  text?: string;
+  /** Monospace part before `sub`, such as a path. */
+  mono?: string;
+  sub?: string;
+  tone?: 'warn' | 'info' | 'bad';
+  actions: NeedsAction[];
+}
+
+/** The push section of the Details panel; only my own PRs have one. */
+export interface PushInfo {
+  push: string;
+  /** Left out when no self-review ran. */
+  selfReview: string | null;
+  /** The review's summary, as tooltip. */
+  selfReviewHint: string | null;
+}
+
+/** A tab a role adds between Overview and Activity. */
+export interface RoleTab {
+  id: string;
+  label: string;
+  badge?: string;
+  badgeClass?: string;
+  main: TemplateRef<unknown> | undefined;
+  side?: TemplateRef<unknown> | undefined;
+}
+
 /**
- * The places of the page frame a role fills with its own markup. The role component declares them as
- * templates, so one instance (with its state) serves all of them.
+ * What a role component gives the page frame: templates for the header and its own tabs, and data (tiles,
+ * to-dos, push info) that the frame lays out once for both roles.
  */
 export interface RoleRegions {
   /** Tags in the tag row of the header. */
   tags?: Signal<TemplateRef<unknown> | undefined>;
   /** Entries of the meta line under the title. */
   meta?: Signal<TemplateRef<unknown> | undefined>;
-  /** Banners right after the one for a blocked PR. */
-  bannersEarly?: Signal<TemplateRef<unknown> | undefined>;
-  /** Banners after the common ones. */
-  bannersLate?: Signal<TemplateRef<unknown> | undefined>;
-  /** Content of the first tab's button. */
-  tabLabel?: Signal<TemplateRef<unknown> | undefined>;
-  /** Content of the first tab. */
-  main?: Signal<TemplateRef<unknown> | undefined>;
-  /** Panels at the top of the side column. */
-  side?: Signal<TemplateRef<unknown> | undefined>;
+  /** The role's tabs, in order. */
+  tabs: Signal<RoleTab[]>;
+  /** The role's tiles, between Build and Agent. */
+  tiles: Signal<Tile[]>;
+  /** What waits for me in this role, most urgent first. */
+  needs: Signal<NeedsItem[]>;
+  push?: Signal<PushInfo | null>;
+  /** Heading of the summary card. */
+  summaryTitle: string;
+  /** Whether the Overview lists the last work items. */
+  recentActivity: boolean;
 }
 
 export const ROLE_LABEL = { own: 'Mine', review: 'Review' } as const;
@@ -103,7 +162,58 @@ export function ciStatus(checkState: string | null): CiStatus | null {
   }
 }
 
+export const WORK_LABEL: Record<WorkItem['kind'], string> = {
+  summarize: 'Summary',
+  comments: 'Comments',
+  answers: 'Decisions',
+  review: 'Review',
+  followup_review: 'Follow-up review',
+  self_review: 'Self-review',
+  close_batch: 'Push',
+};
+
+/** A time the way every date of the page is shown. */
+export const stamp = (iso: string) => formatDate(iso, 'dd.MM. HH:mm', 'en-US');
+
+export const sha7 = (sha: string) => sha.slice(0, 7);
+
 export const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
+
+/** The Build tile: the check state and the head it ran for. */
+export function buildTile(pr: Pr): Tile {
+  const status = ciStatus(pr.check_state);
+  return {
+    label: 'Build',
+    value: status === 'success' ? 'Passing' : status === 'pending' ? 'Running' : status === 'failure' ? 'Failing' : 'No build',
+    sub: `${pr.waitingForBuild ? 'The review waits for a green build · ' : ''}head ${sha7(pr.head_sha)}`,
+    ci: pr.check_state,
+    href: `${pr.url}/checks`,
+  };
+}
+
+/** The Agent tile: what the agent does on this PR right now, and its last run. */
+export function agentTile(pr: Pr, lastRun: WorkItem | null): Tile {
+  const state: Pick<Tile, 'value' | 'dot' | 'pulse'> = pr.agent_running
+    ? { value: 'Working', dot: 'info', pulse: true }
+    : pr.blocked
+      ? { value: 'Blocked', dot: 'bad' }
+      : pr.ignored
+        ? { value: 'Ignored', dot: 'idle' }
+        : pr.paused
+          ? { value: 'Paused', dot: 'idle' }
+          : pr.group === 'queued'
+            ? { value: 'Queued', dot: 'idle' }
+            : { value: 'Idle', dot: 'idle' };
+  const when = lastRun ? (lastRun.finished_at ?? lastRun.started_at) : null;
+  return {
+    label: 'Agent',
+    ...state,
+    sub: lastRun
+      ? `Last run: ${WORK_LABEL[lastRun.kind]}${when ? ` · ${stamp(when)}` : ''}${lastRun.state === 'failed' ? ' · failed' : ''}`
+      : 'No run yet',
+    tab: 'transcript',
+  };
+}
 
 /** "today", "1 day", "5 days": how long ago a time was, in calendar days. */
 export function age(iso: string): string {

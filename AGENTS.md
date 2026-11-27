@@ -1,5 +1,5 @@
 <!-- FOR AI AGENTS - Human readability is a side effect, not a goal -->
-<!-- Last updated: 2026-11-11 | Last verified: 2026-11-11 -->
+<!-- Last updated: 2026-11-27 | Last verified: 2026-11-27 -->
 
 # AGENTS.md
 
@@ -64,7 +64,7 @@ A new kind of PR is a new `Role` implementation registered in `roles/index.ts`, 
 | `prompts/workflow.md` | System prompt of every agent session; `{{…}}` placeholders filled in `settings.ts` `fillPrompt` |
 | `prompts/own.md`, `prompts/review.md` | The part of each role, appended to `workflow.md` (`workflowPrompt`); a session gets only its role's part |
 | `prompts/autonomy.md`, `prompts/risk-classes.md` | Appended to the prompt of my own PRs only with the `autonomy` setting; the risk classes also go into the self-review prompt (setting `selfReviewPrompt`) |
-| `web/src/app/` | Angular standalone components: `overview.ts`, `settings.ts`, `transcript.ts`; `pr-page.ts` is the frame of a PR page, `own-pr.ts` and `review-pr.ts` fill its regions per role; `api.ts` re-exports the API types from `server/model.ts` |
+| `web/src/app/` | Angular standalone components: `overview.ts`, `settings.ts`, `transcript.ts`; `pr-page.ts` is the frame of a PR page, `own-pr.ts` and `review-pr.ts` fill its tabs and give the Overview its tiles and to-dos per role; the Overview is built from shared components (`status-tiles.ts`, `needs-me.ts`, `summary-card.ts`, `work-list.ts`, `details-panel.ts`, `instruction-box.ts`); `item-head.ts`, `conversation.ts` and `done-list.ts` are shared by the role components; `api.ts` re-exports the API types from `server/model.ts` |
 | `nix/module.nix`, `nix/package.nix` | Home Manager module (systemd user service) and package |
 | `test/` | `node:test` tests, one file per server module, plus `architecture.test.ts` |
 

@@ -781,9 +781,6 @@ label select {
   font-size: 13px;
   color: var(--muted);
 }
-.meta .ref {
-  white-space: normal;
-}
 .actions {
   display: flex;
   flex-wrap: wrap;
@@ -884,15 +881,180 @@ label select {
   background: var(--bad-bg);
   color: var(--bad);
 }
-.banner.info {
-  background: var(--info-bg);
-  color: var(--info);
-}
 .banner button {
   margin-left: auto;
 }
-.banner .thread-link button {
-  margin-left: 4px;
+
+/* Overview tab: status strip, rows of the "Needs me" and activity cards, details. */
+.status-strip {
+  flex: 1 1 100%;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+}
+.status-tile {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: flex-start;
+  gap: 4px;
+  height: auto;
+  min-width: 0;
+  padding: 14px 16px;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  color: var(--text);
+  font: 14px/21px var(--sans);
+  text-align: left;
+  white-space: normal;
+  cursor: pointer;
+}
+.status-tile + .status-tile {
+  border-left: 1px solid var(--border);
+}
+.status-tile:hover,
+button.status-tile:hover:not(:disabled) {
+  background: var(--surface-alt);
+  text-decoration: none;
+}
+.status-label {
+  font-size: 12px;
+  color: var(--muted);
+}
+.status-value {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-strong);
+}
+.status-sub {
+  max-width: 100%;
+  font-size: 12px;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.dot.warn {
+  background: var(--warn-dot);
+}
+.dot.info {
+  background: var(--info-dot);
+}
+.dot.bad {
+  background: var(--gh-failure);
+}
+.dot.idle {
+  background: var(--border-strong);
+}
+.card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 16px;
+}
+.row-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 12px 16px;
+  border-top: 1px solid var(--border);
+}
+.row-item.center {
+  align-items: center;
+}
+.row-item > .dot {
+  margin-top: 7px;
+}
+.row-body {
+  flex: 1;
+  min-width: 0;
+}
+.row-sub,
+.row-time {
+  font-size: 12px;
+  color: var(--muted);
+}
+.row-sub {
+  overflow-wrap: anywhere;
+}
+.row-time {
+  white-space: nowrap;
+  font-weight: 400;
+}
+.mono {
+  font-family: var(--mono);
+  font-size: 12px;
+}
+a.button {
+  display: inline-flex;
+  align-items: center;
+  height: 28px;
+  padding: 0 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: 4px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+a.button:hover {
+  background: var(--hover);
+  text-decoration: none;
+}
+a.button-link.small {
+  height: 28px;
+  padding: 0 10px;
+  font-size: 12px;
+}
+.details {
+  display: grid;
+  grid-template-columns: 84px minmax(0, 1fr);
+  gap: 6px 12px;
+  margin: 0;
+  font-size: 13px;
+}
+.details dt {
+  color: var(--muted);
+}
+.details dd {
+  margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.details + .details {
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+.group-label {
+  margin: 0;
+  padding: 8px 2px 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+/* Rows of the Done tab: decision heads inside one card per day. */
+.drow {
+  border-top: 1px solid var(--border);
+}
+.drow.open > .dcard-head {
+  background: var(--surface-alt);
+}
+.drow .dcard-body {
+  padding: 12px 16px 16px 50px;
+}
+app-needs-me,
+app-work-list,
+app-summary-card {
+  display: block;
+}
+app-done-list {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
 }
 
 .card {
