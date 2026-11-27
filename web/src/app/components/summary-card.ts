@@ -11,6 +11,11 @@ import { Component, input } from '@angular/core';
     </div>
     <p class="pre">{{ text() || 'No summary yet.' }}</p>
   `,
+  styles: `
+    :host {
+      display: block;
+    }
+  `,
 })
 export class SummaryCard {
   readonly title = input.required<string>();

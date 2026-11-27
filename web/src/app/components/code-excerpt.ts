@@ -83,6 +83,70 @@ interface Token {
       </div>
     </div>
   `,
+  styles: `
+    .code {
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: var(--surface-alt);
+      overflow: hidden;
+    }
+    .code-head {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      padding: 6px 12px;
+      border-bottom: 1px solid var(--border);
+      background: var(--surface);
+      font-size: 12px;
+      color: var(--muted);
+    }
+    .code-head .lang {
+      display: inline-flex;
+      align-items: center;
+      height: 20px;
+      padding: 0 6px;
+      border-radius: 4px;
+      background: var(--chip-bg);
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--text);
+    }
+    .code-head .range {
+      margin-left: auto;
+    }
+    .code-lines {
+      padding: 6px 0;
+      overflow-x: auto;
+      font: 12.5px/20px var(--mono);
+    }
+    .ln {
+      display: grid;
+      grid-template-columns: 48px max-content;
+      white-space: pre;
+      min-width: 100%;
+    }
+    .ln-no {
+      padding-right: 12px;
+      text-align: right;
+      color: var(--muted);
+      user-select: none;
+    }
+    .ln.hit {
+      background: var(--hit-bg);
+    }
+    .ln.hit .ln-no {
+      color: var(--hit);
+      font-weight: 600;
+    }
+    .ln-src {
+      padding-right: 16px;
+    }
+    @media (prefers-color-scheme: dark) {
+      .ln-src span {
+        color: var(--shiki-dark) !important;
+      }
+    }
+  `,
 })
 export class CodeExcerpt {
   readonly excerpt = input.required<Excerpt>();

@@ -107,6 +107,50 @@ function toEntry(raw: unknown): Entry | null {
       }
     </div>
   `,
+  styles: `
+    .transcript {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    .entry {
+      padding: 6px 10px;
+      border-radius: 6px;
+    }
+    .entry.assistant {
+      background: var(--surface-alt);
+    }
+    .entry.user {
+      border: 1px solid var(--border);
+    }
+    .entry.system {
+      text-align: center;
+    }
+    .entry .text {
+      white-space: pre-wrap;
+      margin: 4px 0;
+    }
+    .entry details {
+      margin: 2px 0;
+    }
+    .entry summary {
+      cursor: pointer;
+      font-family: var(--mono);
+      font-size: 12px;
+      color: var(--muted);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .entry details.error summary,
+    .note.error {
+      color: var(--bad);
+    }
+    .note {
+      font-size: 12px;
+      color: var(--muted);
+    }
+  `,
 })
 export class Transcript {
   private readonly api = inject(Api);

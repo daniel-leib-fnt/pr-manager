@@ -1,14 +1,14 @@
-import { DatePipe, NgTemplateOutlet } from '@angular/common';
+import { NgTemplateOutlet } from '@angular/common';
 import { Component, computed, effect, inject, input, signal, viewChild } from '@angular/core';
 import { Api, type PrDetail } from './api';
 import { DetailsPanel } from './components/details-panel';
 import { InstructionBox } from './components/instruction-box';
 import { NeedsMe } from './components/needs-me';
 import { OwnPr } from './own-pr';
+import { PrHeader } from './pr-header';
 import {
   type ActionRequest,
   type NeedsItem,
-  ROLE_LABEL,
   type RoleRegions,
   agentTile,
   buildTile,
@@ -31,9 +31,9 @@ import { WorkList } from './components/work-list';
 @Component({
   selector: 'app-pr-page',
   imports: [
-    DatePipe,
     NgTemplateOutlet,
     Transcript,
+    PrHeader,
     OwnPr,
     ReviewPr,
     StatusTiles,
@@ -72,108 +72,19 @@ import { WorkList } from './components/work-list';
 
       <!-- Everything below reads the role's signals (tabs, tiles, to-dos), which read its inputs. Those are bound when
            the role's own embedded view is checked, after this view's bindings; an embedded view declared after it is
-           checked later, so the reads find the inputs set. -->
+           checked later, so the reads find the inputs set. The header is a component of its own, but its role inputs
+           (tags, meta, tabs) are bound here, so it has to stay inside this block. -->
       @if (role()) {
-        <header class="pr-header">
-          <div class="page">
-            <div class="pr-head-row">
-              <div class="pr-head-main">
-                <div class="tag-row">
-                  <span class="tag" [class]="d.pr.role">{{ roleLabel[d.pr.role] }}</span>
-                  <ng-container *ngTemplateOutlet="region('tags')" />
-                  @if (d.pr.is_draft) {
-                    <span class="tag">Draft</span>
-                  }
-                  @if (d.pr.state !== 'open') {
-                    <span class="tag">{{ d.pr.state }}</span>
-                  }
-                  @if (d.pr.paused) {
-                    <span class="tag">Paused</span>
-                  }
-                  @if (d.pr.ignored) {
-                    <span class="tag">Ignored</span>
-                  }
-                </div>
-                <h1>{{ d.pr.title }}</h1>
-                <div class="meta">
-                  <ng-container *ngTemplateOutlet="region('meta')" />
-                  <a [href]="d.pr.url" target="_blank" rel="noopener">{{ d.pr.repo }}#{{ d.pr.number }} ↗</a>
-                  @if (d.pr.gh_updated_at) {
-                    <span>updated {{ d.pr.gh_updated_at | date: 'dd.MM. HH:mm' }}</span>
-                  }
-                </div>
-              </div>
-              <div class="actions">
-                @if (d.pr.paused) {
-                  <button (click)="act('resume')">Resume agent</button>
-                } @else {
-                  <button (click)="act('pause')">Pause agent</button>
-                }
-                @if (d.pr.role === 'review' && d.pr.ignored) {
-                  <button (click)="act('unignore')">Stop ignoring</button>
-                } @else if (d.pr.role === 'review' && d.pr.state === 'open') {
-                  <button (click)="act('ignore')">Ignore review</button>
-                }
-                @if (moreActions()) {
-                  <button aria-label="More actions" [attr.aria-expanded]="menuOpen()" (click)="menuOpen.set(!menuOpen())">
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-                      <circle cx="5" cy="12" r="1.8" />
-                      <circle cx="12" cy="12" r="1.8" />
-                      <circle cx="19" cy="12" r="1.8" />
-                    </svg>
-                  </button>
-                  @if (menuOpen()) {
-                    <div class="menu" role="menu">
-                      @if (d.pr.role === 'review') {
-                        <button role="menuitem" (click)="act('followup-review')">Review again</button>
-                      } @else if (d.pr.counts.proposals || d.pr.counts.questions) {
-                        <button role="menuitem" (click)="act('followup-review')">Check open items again</button>
-                      }
-                      @if (d.pr.session_id && !d.pr.agent_running) {
-                        <button role="menuitem" (click)="confirmAct('reset-session', 'Start a fresh agent session for this PR?')">
-                          Reset session
-                        </button>
-                      }
-                      @if (d.pr.state === 'closed') {
-                        <button role="menuitem" (click)="confirmAct('remove-worktree', 'Remove the worktree of this closed PR?')">
-                          Remove worktree
-                        </button>
-                      }
-                    </div>
-                  }
-                }
-              </div>
-            </div>
-            @if (d.pr.blocked) {
-              <div class="banner error">
-                <strong>Blocked.</strong>
-                {{ d.pr.blocked }}
-                <button class="small" (click)="act('unblock')">Retry</button>
-              </div>
-            }
-            @if (error()) {
-              <div class="banner error">{{ error() }}</div>
-            }
-            <nav class="tabs" aria-label="Sections">
-              <button class="tab" [class.on]="tab() === 'overview'" (click)="tab.set('overview')">Overview</button>
-              @for (t of roleTabs(); track t.id) {
-                <button class="tab" [class.on]="tab() === t.id" (click)="tab.set(t.id)">
-                  {{ t.label }}
-                  @if (t.badge) {
-                    <span class="tag small" [class]="t.badgeClass ?? ''">{{ t.badge }}</span>
-                  }
-                </button>
-              }
-              <button class="tab" [class.on]="tab() === 'activity'" (click)="tab.set('activity')">Activity</button>
-              <button class="tab" [class.on]="tab() === 'transcript'" (click)="tab.set('transcript')">
-                Agent transcript
-                @if (d.pr.agent_running) {
-                  <span class="tag small info">working</span>
-                }
-              </button>
-            </nav>
-          </div>
-        </header>
+        <app-pr-header
+          [pr]="d.pr"
+          [tags]="region('tags')"
+          [meta]="region('meta')"
+          [tabs]="roleTabs()"
+          [error]="error()"
+          [(tab)]="tab"
+          [(menuOpen)]="menuOpen"
+          (action)="request($event)"
+        />
 
         <div class="page pr-body">
           @if (tab() === 'overview') {
@@ -216,12 +127,35 @@ import { WorkList } from './components/work-list';
       <p class="muted page">Loading…</p>
     }
   `,
+  styles: `
+    .pr-body {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 24px;
+      align-items: flex-start;
+    }
+    .main-col {
+      flex: 999 1 600px;
+      min-width: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+    .side-col {
+      flex: 1 1 320px;
+      min-width: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+      position: sticky;
+      top: 24px;
+    }
+  `,
 })
 export class PrPage {
   private readonly api = inject(Api);
   readonly id = input.required<string>();
   protected readonly plural = plural;
-  protected readonly roleLabel = ROLE_LABEL;
   protected readonly data = signal<PrDetail | null>(null);
   protected readonly draft = signal(emptyDraft());
   protected readonly busy = signal(false);
@@ -261,12 +195,6 @@ export class PrPage {
       })),
   );
   protected readonly needs = computed(() => [...(this.role()?.needs() ?? []), ...this.followUps()]);
-  protected readonly moreActions = computed(() => {
-    const pr = this.data()?.pr;
-    return (
-      !!pr && ((pr.role === 'review' && pr.review_state === 'submitted') || (!!pr.session_id && !pr.agent_running) || pr.state === 'closed')
-    );
-  });
 
   constructor() {
     // Switching PRs in the sidebar reuses this page: drop the previous PR right away.
@@ -321,14 +249,6 @@ export class PrPage {
       await this.api.action(this.prId(), r.name, r.body);
       r.done?.();
     });
-  }
-
-  protected act(name: string) {
-    this.request({ name });
-  }
-
-  protected confirmAct(name: string, question: string) {
-    this.request({ name, confirm: question });
   }
 
   protected instruct() {

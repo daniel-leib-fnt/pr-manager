@@ -36,6 +36,23 @@ const LABEL = { success: 'Checks passing', pending: 'Checks pending', failure: '
       </ng-template>
     }
   `,
+  styles: `
+    .ci-success {
+      background: var(--gh-success-bg);
+      color: var(--gh-success);
+    }
+    .ci-pending {
+      background: var(--gh-pending-bg);
+      color: var(--gh-pending-fg);
+    }
+    .ci-failure {
+      background: var(--gh-failure-bg);
+      color: var(--gh-failure);
+    }
+    .ci-icon {
+      flex: none;
+    }
+  `,
 })
 export class Ci {
   readonly state = input<string | null>(null);

@@ -30,6 +30,11 @@ import { WORK_LABEL } from '../pr-view';
       <div class="row-item"><span class="muted">Nothing yet.</span></div>
     }
   `,
+  styles: `
+    :host {
+      display: block;
+    }
+  `,
 })
 export class WorkList {
   readonly title = input.required<string>();

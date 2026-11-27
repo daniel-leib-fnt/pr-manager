@@ -1,8 +1,7 @@
 import { Component, computed, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { Api, type DeniedCall, type NixOnly, type Setting } from './api';
-
-const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+import { SettingInput } from './setting-input';
 
 /** Editable text form of a value; lists are one entry per line, maps one "key value" per line. */
 function toDraft(s: Setting): unknown {
@@ -36,8 +35,8 @@ function fromDraft(s: Setting, draft: unknown): unknown {
 
 @Component({
   selector: 'app-settings',
-  imports: [FormsModule],
-  host: { class: 'page settings-page' },
+  imports: [FormsModule, SettingInput],
+  host: { class: 'page' },
   template: `
     <h1>Settings</h1>
     <p class="muted">Changes apply on the next poll or agent run. Reset returns to the Home Manager value or the built-in default.</p>
@@ -57,50 +56,7 @@ function fromDraft(s: Setting, draft: unknown): unknown {
             @if (s.help) {
               <p class="muted small">{{ s.help }}</p>
             }
-            @switch (s.type) {
-              @case ('boolean') {
-                <label class="inline">
-                  <input type="checkbox" [(ngModel)]="drafts[s.key]" />
-                  enabled
-                </label>
-              }
-              @case ('number') {
-                <input type="number" class="narrow" [(ngModel)]="drafts[s.key]" />
-              }
-              @case ('string') {
-                <input [(ngModel)]="drafts[s.key]" />
-              }
-              @case ('enum') {
-                <select [(ngModel)]="drafts[s.key]">
-                  @for (o of s.options; track o.value) {
-                    <option [value]="o.value">{{ o.label }}</option>
-                  }
-                </select>
-              }
-              @case ('days') {
-                <div class="choice">
-                  @for (d of days; track $index) {
-                    <label class="inline">
-                      <input type="checkbox" [checked]="has(s.key, $index)" (change)="flip(s.key, $index)" />
-                      {{ d }}
-                    </label>
-                  }
-                </div>
-              }
-              @case ('multi') {
-                <div class="choice">
-                  @for (o of s.options; track o.value) {
-                    <label class="inline">
-                      <input type="checkbox" [checked]="has(s.key, o.value)" (change)="flip(s.key, o.value)" />
-                      {{ o.label }}
-                    </label>
-                  }
-                </div>
-              }
-              @default {
-                <textarea [rows]="s.type === 'text' ? 8 : 5" [(ngModel)]="drafts[s.key]"></textarea>
-              }
-            }
+            <app-setting-input [setting]="s" [(value)]="drafts[s.key]" />
             <div class="setting-actions">
               <button (click)="save(s)" [disabled]="!dirty(s) || busy()">Save</button>
               @if (s.source === 'override') {
@@ -145,10 +101,44 @@ function fromDraft(s: Setting, draft: unknown): unknown {
       </ul>
     </section>
   `,
+  styles: `
+    .items {
+      list-style: none;
+      margin: 0;
+      padding: 0;
+    }
+    .items li {
+      padding: 8px 0;
+      border-top: 1px solid var(--border);
+    }
+    .items li:first-child {
+      border-top: 0;
+    }
+    .setting {
+      border-top: 1px solid var(--border);
+      padding: 12px 0;
+    }
+    .setting:first-of-type {
+      border-top: 0;
+      padding-top: 0;
+    }
+    .setting-head {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+    }
+    .setting-actions {
+      display: flex;
+      gap: 8px;
+      margin-top: 6px;
+    }
+    .card + .card {
+      margin-top: 16px;
+    }
+  `,
 })
 export class SettingsPage {
   private readonly api = inject(Api);
-  protected readonly days = DAYS;
   protected readonly settings = signal<Setting[]>([]);
   protected readonly nixOnly = signal<NixOnly[]>([]);
   protected readonly denied = signal<DeniedCall[]>([]);
@@ -187,15 +177,6 @@ export class SettingsPage {
 
   protected dirty(s: Setting): boolean {
     return JSON.stringify(fromDraft(s, this.drafts[s.key])) !== JSON.stringify(s.value);
-  }
-
-  protected has(key: string, v: unknown): boolean {
-    return (this.drafts[key] as unknown[]).includes(v);
-  }
-
-  protected flip(key: string, v: unknown) {
-    const list = this.drafts[key] as unknown[];
-    this.drafts[key] = list.includes(v) ? list.filter((x) => x !== v) : [...list, v].sort();
   }
 
   private async run(fn: () => Promise<{ settings: Setting[] }>) {

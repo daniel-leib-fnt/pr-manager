@@ -1,9 +1,10 @@
 import { DatePipe } from '@angular/common';
 import { Component, computed, input, signal } from '@angular/core';
 import type { Comment } from './api';
-import { CodeExcerpt } from './components/code-excerpt';
-import { Conversation, type Message } from './components/conversation';
+import type { Message } from './components/conversation';
+import { GroupToggle } from './components/group-toggle';
 import { ItemHead } from './components/item-head';
+import { ThreadView } from './components/thread-view';
 import { type Entry, headline, kindLabel, messages, outcome, replyOf } from './own-entries';
 import { plural } from './pr-view';
 
@@ -19,7 +20,7 @@ const dayOf = (iso: string) => {
  */
 @Component({
   selector: 'app-done-list',
-  imports: [DatePipe, CodeExcerpt, Conversation, ItemHead],
+  imports: [DatePipe, GroupToggle, ItemHead, ThreadView],
   template: `
     @if (entries().length) {
       <div class="list-head">
@@ -31,28 +32,12 @@ const dayOf = (iso: string) => {
     }
     @for (g of groups(); track g.day) {
       <section class="card pad-0">
-        <button
-          class="group-toggle"
-          [class.collapsed]="closedGroups()[g.day]"
-          [attr.aria-expanded]="!closedGroups()[g.day]"
-          (click)="toggleGroup(g.day)"
-        >
-          <svg
-            class="chevron"
-            width="16"
-            height="16"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="2"
-            stroke-linecap="round"
-            aria-hidden="true"
-          >
-            <path d="m6 9 6 6 6-6" />
-          </svg>
-          Done {{ g.at | date: 'dd.MM.' }}
-          <span class="count">{{ plural(g.rows.length, 'item') }}</span>
-        </button>
+        <app-group-toggle
+          [open]="!closedGroups()[g.day]"
+          [label]="'Done ' + (g.at | date: 'dd.MM.')"
+          [count]="plural(g.rows.length, 'item')"
+          (toggle)="toggleGroup(g.day)"
+        />
         @if (!closedGroups()[g.day]) {
           @for (e of g.rows; track e.key) {
             <div class="drow" [class.open]="isOpen(e)">
@@ -73,13 +58,11 @@ const dayOf = (iso: string) => {
               @if (isOpen(e)) {
                 <div class="dcard-body">
                   @if (e.comment; as c) {
-                    @if (c.excerpt && c.path) {
-                      <app-code-excerpt [excerpt]="c.excerpt" [path]="c.path" />
-                    }
-                    @if (c.task) {
-                      <p class="task">☐ {{ c.task }}</p>
-                    }
-                    <app-conversation [messages]="thread(c)" />
+                    <app-thread-view [excerpt]="c.excerpt" [path]="c.path" [messages]="thread(c)">
+                      @if (c.task) {
+                        <p class="task">☐ {{ c.task }}</p>
+                      }
+                    </app-thread-view>
                     @if (c.note && c.kind !== 'ci') {
                       <p class="muted small">{{ c.note }}</p>
                     }
@@ -93,6 +76,23 @@ const dayOf = (iso: string) => {
           }
         }
       </section>
+    }
+  `,
+  styles: `
+    /* Rows of the Done tab: decision heads inside one card per day. */
+    .drow {
+      border-top: 1px solid var(--border);
+    }
+    .drow.open > .dcard-head {
+      background: var(--surface-alt);
+    }
+    .drow .dcard-body {
+      padding: 12px 16px 16px 50px;
+    }
+    :host {
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
     }
   `,
 })

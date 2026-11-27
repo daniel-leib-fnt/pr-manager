@@ -81,6 +81,59 @@ import { nextStep, plural } from './pr-view';
       </span>
     </section>
   `,
+  styles: `
+    .tiles {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 16px;
+    }
+    .tile {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      padding: 16px 20px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      box-shadow: var(--shadow);
+    }
+    .tile.needs {
+      border-color: var(--warn-dot);
+    }
+    .tile-label {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 12px;
+      font-weight: 600;
+    }
+    .tile-value {
+      font: 700 32px/38px var(--sans);
+      color: var(--text-strong);
+      font-variant-numeric: tabular-nums;
+    }
+    .tile-note {
+      font-size: 12px;
+      color: var(--muted);
+    }
+    .next-up {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 16px;
+    }
+    .next-up > div {
+      flex: 1 1 300px;
+      min-width: 0;
+    }
+    .shortcuts {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px 24px;
+      font-size: 12px;
+      color: var(--muted);
+    }
+  `,
 })
 export class Home {
   private readonly api = inject(Api);
