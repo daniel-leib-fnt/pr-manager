@@ -7,7 +7,7 @@ export interface VerdictLabels {
   submitted: string;
 }
 
-/** The status tiles of a PR I review: my review, my threads, the author. */
+/** The status tiles of a PR I review: my review and my threads. */
 export function reviewTiles(pr: ReviewPrSummary, threads: ReviewThread[], draftFindings: Finding[], verdict: VerdictLabels): Tile[] {
   const open = threads.filter((t) => !t.resolved);
   const answered = open.filter((t) => t.comments.at(-1)?.author === pr.author).length;
@@ -36,14 +36,6 @@ export function reviewTiles(pr: ReviewPrSummary, threads: ReviewThread[], draftF
       sub: `${answered} answered by the author${replies ? ` · ${replies} with a reply in the draft` : ''}`,
       tone: answered ? 'action' : open.length ? 'wait' : 'ok',
       tab: 'review',
-    },
-    {
-      label: 'Author',
-      value: pr.author,
-      sub:
-        `head ${sha7(pr.head_sha)}${pr.head_seen_at ? ` since ${stamp(pr.head_seen_at)}` : ''}` +
-        (pr.reviewed_sha && pr.reviewed_sha !== pr.head_sha ? ' · new commits since my review' : ''),
-      href: pr.url,
     },
   ];
 }

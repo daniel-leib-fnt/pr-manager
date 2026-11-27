@@ -36,7 +36,7 @@ const TONE_LABEL: Record<TileTone, string> = {
       <span class="status-value">
         @if (t.ci) {
           <app-ci [state]="t.ci" />
-        } @else if (t.tone) {
+        } @else {
           <svg class="tone-icon" width="16" height="16" viewBox="0 0 16 16" fill="none" role="img" [attr.aria-label]="toneLabel(t.tone)">
             <title>{{ toneLabel(t.tone) }}</title>
             @switch (t.tone) {

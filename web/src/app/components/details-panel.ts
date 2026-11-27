@@ -1,16 +1,20 @@
 import { Component, input } from '@angular/core';
 import type { Pr, WorkItem } from '../api';
-import { type PushInfo, WORK_LABEL, stamp } from '../pr-view';
+import { type PushInfo, WORK_LABEL, sha7, stamp } from '../pr-view';
 
-/** Branch, worktree and agent session of the PR, and for my own PRs what waits for the push. */
+/** Author, branch, head, worktree and agent session of the PR, and for my own PRs what waits for the push. */
 @Component({
   selector: 'app-details-panel',
   host: { class: 'card panel' },
   template: `
     <h2>Details</h2>
     <dl class="details">
+      <dt>Author</dt>
+      <dd>{{ pr().author }}</dd>
       <dt>Branch</dt>
       <dd class="mono">{{ pr().head_ref }} → {{ pr().base_ref }}</dd>
+      <dt>Head</dt>
+      <dd class="mono">{{ sha7(pr().head_sha) }}</dd>
       <dt>Worktree</dt>
       <dd [class.mono]="pr().worktree">{{ pr().worktree ?? 'none' }}</dd>
       @if (pr().kept) {
@@ -67,4 +71,5 @@ export class DetailsPanel {
   readonly push = input<PushInfo | null>(null);
   protected readonly label = WORK_LABEL;
   protected readonly stamp = stamp;
+  protected readonly sha7 = sha7;
 }

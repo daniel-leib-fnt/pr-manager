@@ -76,8 +76,8 @@ export interface Tile {
   label: string;
   value: string;
   sub?: string;
-  /** Left out on a tile that only informs, such as the author. */
-  tone?: TileTone;
+  /** Every tile shows a state that changes; a fixed fact, such as the author, goes into the Details panel. */
+  tone: TileTone;
   /** A pulsing dot instead of the icon of `wait`: something runs right now. */
   pulse?: boolean;
   /** `check_state` of the PR: the build icon the way GitHub shows it replaces the icon of the tone. */
