@@ -173,7 +173,7 @@ import { type ActionRequest, ROLE_LABEL, type RoleTab } from './pr-view';
       padding: 4px;
       background: var(--surface);
       border: 1px solid var(--border);
-      border-radius: 8px;
+      border-radius: var(--radius);
       box-shadow: 0 4px 12px rgba(16, 24, 40, 0.12);
     }
     .menu button {

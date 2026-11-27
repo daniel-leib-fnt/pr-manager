@@ -41,7 +41,7 @@ import { nextStep } from './pr-view';
       gap: 2px;
       margin: 0 8px;
       padding: 8px 10px;
-      border-radius: 8px;
+      border-radius: var(--radius);
       color: inherit;
     }
     .pr-item:hover {

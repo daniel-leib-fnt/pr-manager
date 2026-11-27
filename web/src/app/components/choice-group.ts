@@ -33,7 +33,7 @@ export interface Choice<T extends string = string> {
       grid-auto-flow: column;
       grid-auto-columns: minmax(0, 1fr);
       border: 1px solid var(--border-strong);
-      border-radius: 4px;
+      border-radius: var(--radius-sm);
       overflow: hidden;
     }
     button {

@@ -86,7 +86,7 @@ interface Token {
   styles: `
     .code {
       border: 1px solid var(--border);
-      border-radius: 8px;
+      border-radius: var(--radius);
       background: var(--surface-alt);
       overflow: hidden;
     }
@@ -105,7 +105,7 @@ interface Token {
       align-items: center;
       height: 20px;
       padding: 0 6px;
-      border-radius: 4px;
+      border-radius: var(--radius-sm);
       background: var(--chip-bg);
       font-size: 11px;
       font-weight: 600;

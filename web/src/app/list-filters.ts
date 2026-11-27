@@ -87,7 +87,7 @@ const ROLES: { key: Filters['role']; label: string }[] = [
       padding: 0 10px;
       margin: 0;
       border: 1px solid var(--border-strong);
-      border-radius: 4px;
+      border-radius: var(--radius-sm);
       background: var(--surface);
       color: var(--muted);
     }
@@ -109,7 +109,7 @@ const ROLES: { key: Filters['role']; label: string }[] = [
     .segmented {
       display: inline-flex;
       border: 1px solid var(--border-strong);
-      border-radius: 4px;
+      border-radius: var(--radius-sm);
       overflow: hidden;
     }
     .segmented button {

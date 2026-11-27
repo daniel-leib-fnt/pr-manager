@@ -30,7 +30,7 @@ export interface Count {
       gap: 6px;
       padding: 12px;
       background: var(--surface-alt);
-      border-radius: 8px;
+      border-radius: var(--radius);
       font-size: 13px;
     }
     .counts > div {

@@ -94,7 +94,7 @@ import { nextStep, plural } from './pr-view';
       padding: 16px 20px;
       background: var(--surface);
       border: 1px solid var(--border);
-      border-radius: 12px;
+      border-radius: var(--radius);
       box-shadow: var(--shadow);
     }
     .tile.needs {
