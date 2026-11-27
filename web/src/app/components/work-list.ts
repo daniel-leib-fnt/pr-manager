@@ -1,7 +1,7 @@
 import { DatePipe } from '@angular/common';
 import { Component, computed, input, output } from '@angular/core';
-import type { WorkItem } from './api';
-import { WORK_LABEL } from './pr-view';
+import type { WorkItem } from '../api';
+import { WORK_LABEL } from '../pr-view';
 
 /** The agent's work items, newest first: the whole Activity tab, or the last few on the Overview. */
 @Component({

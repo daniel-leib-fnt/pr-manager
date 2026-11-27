@@ -1,10 +1,10 @@
 import { Component, TemplateRef, computed, input, output, signal, viewChild } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import type { Comment, OwnPrSummary, Question, SelfReview } from './api';
-import { CodeExcerpt } from './code-excerpt';
-import { Conversation } from './conversation';
+import { CodeExcerpt } from './components/code-excerpt';
+import { Conversation } from './components/conversation';
 import { DoneList } from './done-list';
-import { ItemHead } from './item-head';
+import { ItemHead } from './components/item-head';
 import { type Entry, LABEL, TAG_CLASS, headline, kindLabel, messages, replyOf, settledDecision } from './own-entries';
 import {
   type Action,

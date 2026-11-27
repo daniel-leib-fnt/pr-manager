@@ -1,9 +1,9 @@
 import { DatePipe, NgTemplateOutlet } from '@angular/common';
 import { Component, computed, effect, inject, input, signal, viewChild } from '@angular/core';
 import { Api, type PrDetail } from './api';
-import { DetailsPanel } from './details-panel';
-import { InstructionBox } from './instruction-box';
-import { NeedsMe } from './needs-me';
+import { DetailsPanel } from './components/details-panel';
+import { InstructionBox } from './components/instruction-box';
+import { NeedsMe } from './components/needs-me';
 import { OwnPr } from './own-pr';
 import {
   type ActionRequest,
@@ -18,10 +18,10 @@ import {
   saveDraft,
 } from './pr-view';
 import { ReviewPr } from './review-pr';
-import { StatusTiles } from './status-tiles';
-import { SummaryCard } from './summary-card';
+import { StatusTiles } from './components/status-tiles';
+import { SummaryCard } from './components/summary-card';
 import { Transcript } from './transcript';
-import { WorkList } from './work-list';
+import { WorkList } from './components/work-list';
 
 /**
  * The frame every PR page shares: header, tabs, Overview, activity, transcript and the instruction box. What

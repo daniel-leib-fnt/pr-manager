@@ -2,9 +2,9 @@ import { NgTemplateOutlet } from '@angular/common';
 import { Component, TemplateRef, computed, input, output, viewChild, type OnChanges, type SimpleChanges } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import type { Finding, ReviewPrSummary, ReviewThread } from './api';
-import { CodeExcerpt } from './code-excerpt';
-import { Conversation, type Message } from './conversation';
-import { ItemHead } from './item-head';
+import { CodeExcerpt } from './components/code-excerpt';
+import { Conversation, type Message } from './components/conversation';
+import { ItemHead } from './components/item-head';
 import {
   type ActionRequest,
   type Draft,

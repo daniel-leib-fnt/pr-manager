@@ -1,7 +1,7 @@
 import { NgTemplateOutlet } from '@angular/common';
 import { Component, input, output } from '@angular/core';
 import { Ci } from './ci';
-import type { Tile } from './pr-view';
+import type { Tile } from '../pr-view';
 
 /** The strip of status tiles on the Overview; each opens a tab of the page or a page on GitHub. */
 @Component({

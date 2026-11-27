@@ -1,6 +1,6 @@
 import { Component, input, output } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import type { Draft } from './pr-view';
+import type { Draft } from '../pr-view';
 
 /** The card "Instruction to the agent". The text lives in the page's draft, so it survives a tab switch and a reload. */
 @Component({

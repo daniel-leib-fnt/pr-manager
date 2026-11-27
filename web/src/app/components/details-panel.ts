@@ -1,6 +1,6 @@
 import { Component, input } from '@angular/core';
-import type { Pr, WorkItem } from './api';
-import { type PushInfo, WORK_LABEL, stamp } from './pr-view';
+import type { Pr, WorkItem } from '../api';
+import { type PushInfo, WORK_LABEL, stamp } from '../pr-view';
 
 /** Branch, worktree and agent session of the PR, and for my own PRs what waits for the push. */
 @Component({

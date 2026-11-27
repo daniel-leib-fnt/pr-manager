@@ -1,6 +1,6 @@
 import { DatePipe } from '@angular/common';
 import { Component, input, output } from '@angular/core';
-import { type ActionRequest, type NeedsItem, plural } from './pr-view';
+import { type ActionRequest, type NeedsItem, plural } from '../pr-view';
 
 /** Everything that waits for me on this PR, one row per to-do with its buttons. */
 @Component({

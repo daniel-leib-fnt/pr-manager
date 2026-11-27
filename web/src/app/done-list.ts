@@ -1,9 +1,9 @@
 import { DatePipe } from '@angular/common';
 import { Component, computed, input, signal } from '@angular/core';
 import type { Comment } from './api';
-import { CodeExcerpt } from './code-excerpt';
-import { Conversation, type Message } from './conversation';
-import { ItemHead } from './item-head';
+import { CodeExcerpt } from './components/code-excerpt';
+import { Conversation, type Message } from './components/conversation';
+import { ItemHead } from './components/item-head';
 import { type Entry, headline, kindLabel, messages, outcome, replyOf } from './own-entries';
 import { plural } from './pr-view';
 

@@ -1,6 +1,6 @@
 import { NgTemplateOutlet } from '@angular/common';
 import { Component, computed, input } from '@angular/core';
-import { ciStatus } from './pr-view';
+import { ciStatus } from '../pr-view';
 
 const LABEL = { success: 'Checks passing', pending: 'Checks pending', failure: 'Checks failing' };
 

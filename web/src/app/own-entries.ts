@@ -1,5 +1,5 @@
 import type { Comment, Question } from './api';
-import type { Message } from './conversation';
+import type { Message } from './components/conversation';
 import type { Action } from './pr-view';
 
 /** Helpers of the decision list of my PR, shared by the Decisions tab and the Done tab. */
