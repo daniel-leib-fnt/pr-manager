@@ -17,7 +17,7 @@ function selfReviewOf(pr: OwnPrSummary): SelfReview | null {
   return raw ? (JSON.parse(raw) as SelfReview) : null;
 }
 
-/** The status tiles of my PR: decisions, push, GitHub. */
+/** The status tiles of my PR: decisions, push, GitHub, and the final review with autonomy. */
 export function ownTiles(pr: OwnPrSummary, p: DecisionProgress): Tile[] {
   const r = selfReviewOf(pr);
   const undecided = p.open.length - p.decided;
@@ -25,7 +25,6 @@ export function ownTiles(pr: OwnPrSummary, p: DecisionProgress): Tile[] {
   const threads = pr.openThreads.length;
   const since = pr.waitingSince ? age(pr.waitingSince) : '';
   const github = [
-    pr.final_review_id ? 'Final review open' : '',
     pr.openTasks ? plural(pr.openTasks, 'open task') : '',
     pr.waitingSince ? `last activity ${since}${since === 'today' ? '' : ' ago'}` : '',
   ].filter(Boolean);
@@ -34,7 +33,7 @@ export function ownTiles(pr: OwnPrSummary, p: DecisionProgress): Tile[] {
       label: 'Decisions',
       value: undecided ? `${undecided} open` : 'None open',
       sub: p.open.length ? `${p.decided} decided · ${p.agentDecided} pre-decided by the agent` : `${plural(p.done, 'item')} done`,
-      dot: undecided ? 'warn' : undefined,
+      tone: undecided ? 'action' : 'ok',
       tab: 'decisions',
     },
     {
@@ -47,7 +46,7 @@ export function ownTiles(pr: OwnPrSummary, p: DecisionProgress): Tile[] {
           : pr.batch === 'closable'
             ? 'Push is up next'
             : '',
-      dot: failed ? 'bad' : undefined,
+      tone: failed ? 'bad' : pr.counts.pending || pr.batch === 'closable' ? 'wait' : 'ok',
       tab: 'decisions',
     },
     {
@@ -60,10 +59,24 @@ export function ownTiles(pr: OwnPrSummary, p: DecisionProgress): Tile[] {
             ? 'Draft'
             : 'Waiting for review',
       sub: github.join(' · '),
-      dot: threads || pr.final_review_id ? 'warn' : undefined,
+      tone: threads ? 'action' : pr.ready ? 'ok' : pr.is_draft ? 'idle' : 'wait',
       href: pr.url,
     },
+    // Only with autonomy, or when a final review is still open after it was turned off: otherwise none ever comes.
+    ...(pr.autonomy || pr.final_review_id ? [finalReviewTile(pr)] : []),
   ];
+}
+
+function finalReviewTile(pr: OwnPrSummary): Tile {
+  return pr.final_review_id
+    ? {
+        label: 'Final review',
+        value: 'Waiting for my tick',
+        sub: 'Changes the agent decided alone',
+        tone: 'action',
+        href: `${pr.url}#issuecomment-${pr.final_review_id}`,
+      }
+    : { label: 'Final review', value: 'Nothing to check', tone: 'ok', href: pr.url };
 }
 
 /** What my own PR leaves me to do: the failed self-review, open decisions, unanswered threads, the final review, a nudge. */

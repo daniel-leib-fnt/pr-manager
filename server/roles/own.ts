@@ -377,6 +377,7 @@ export const own: Role<OwnPr, OwnRun> = {
     waitingSince: waitingSince(pr),
     nudge: nudgeDue(pr) && batchOf(db, pr) === 'none' && !pr.ready,
     openTasks: openTasks(db, pr),
+    autonomy: setting('autonomy'),
   }),
 
   detail: () => ({ findings: [], threads: [] }),

@@ -65,15 +65,22 @@ export interface ActionRequest {
   done?: () => void;
 }
 
+/**
+ * The state of a tile, shown as icon and, for `action` and `bad`, as tinted background, so that it reads at a glance:
+ * `action` waits for me, `wait` for others or a running job, `idle` for nothing.
+ */
+export type TileTone = 'ok' | 'action' | 'wait' | 'bad' | 'idle';
+
 /** One tile of the status strip on the Overview tab. It opens a tab of the page or a page on GitHub. */
 export interface Tile {
   label: string;
   value: string;
   sub?: string;
-  /** A dot before the value. */
-  dot?: 'warn' | 'info' | 'bad' | 'idle';
+  /** Left out on a tile that only informs, such as the author. */
+  tone?: TileTone;
+  /** A pulsing dot instead of the icon of `wait`: something runs right now. */
   pulse?: boolean;
-  /** `check_state` of the PR: shows the build icon before the value. */
+  /** `check_state` of the PR: the build icon the way GitHub shows it replaces the icon of the tone. */
   ci?: string | null;
   tab?: string;
   href?: string;
@@ -186,24 +193,25 @@ export function buildTile(pr: Pr): Tile {
     label: 'Build',
     value: status === 'success' ? 'Passing' : status === 'pending' ? 'Running' : status === 'failure' ? 'Failing' : 'No build',
     sub: `${pr.waitingForBuild ? 'The review waits for a green build · ' : ''}head ${sha7(pr.head_sha)}`,
-    ci: pr.check_state,
+    tone: status === 'success' ? 'ok' : status === 'pending' ? 'wait' : status === 'failure' ? 'bad' : 'idle',
+    ci: status ? pr.check_state : undefined,
     href: `${pr.url}/checks`,
   };
 }
 
 /** The Agent tile: what the agent does on this PR right now, and its last run. */
 export function agentTile(pr: Pr, lastRun: WorkItem | null): Tile {
-  const state: Pick<Tile, 'value' | 'dot' | 'pulse'> = pr.agent_running
-    ? { value: 'Working', dot: 'info', pulse: true }
+  const state: Pick<Tile, 'value' | 'tone' | 'pulse'> = pr.agent_running
+    ? { value: 'Working', tone: 'wait', pulse: true }
     : pr.blocked
-      ? { value: 'Blocked', dot: 'bad' }
+      ? { value: 'Blocked', tone: 'bad' }
       : pr.ignored
-        ? { value: 'Ignored', dot: 'idle' }
+        ? { value: 'Ignored', tone: 'idle' }
         : pr.paused
-          ? { value: 'Paused', dot: 'idle' }
+          ? { value: 'Paused', tone: 'idle' }
           : pr.group === 'queued'
-            ? { value: 'Queued', dot: 'idle' }
-            : { value: 'Idle', dot: 'idle' };
+            ? { value: 'Queued', tone: 'wait' }
+            : { value: 'Idle', tone: 'idle' };
   const when = lastRun ? (lastRun.finished_at ?? lastRun.started_at) : null;
   return {
     label: 'Agent',

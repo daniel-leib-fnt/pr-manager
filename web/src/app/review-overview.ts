@@ -12,25 +12,29 @@ export function reviewTiles(pr: ReviewPrSummary, threads: ReviewThread[], draftF
   const open = threads.filter((t) => !t.resolved);
   const answered = open.filter((t) => t.comments.at(-1)?.author === pr.author).length;
   const replies = draftFindings.filter((f) => f.thread_id).length;
-  const review: Pick<Tile, 'value' | 'sub' | 'dot'> =
+  const review: Pick<Tile, 'value' | 'sub' | 'tone'> =
     pr.review_state === 'draft'
       ? {
           value: 'Draft ready',
           sub: `${plural(draftFindings.length, 'finding')} · verdict ${verdict.draft}`,
-          dot: 'warn',
+          tone: 'action',
         }
       : pr.review_state === 'submitted'
         ? {
             value: pr.review_out_of_date ? 'Out of date' : 'Submitted',
             sub: verdict.submitted + (pr.reviewed_at ? ` · ${stamp(pr.reviewed_at)}` : ''),
+            tone: pr.review_out_of_date ? 'action' : 'ok',
           }
-        : { value: pr.waitingForBuild ? 'Waiting for build' : pr.noBuild ? 'No build' : 'Not drafted yet' };
+        : pr.noBuild
+          ? { value: 'No build', tone: 'idle' }
+          : { value: pr.waitingForBuild ? 'Waiting for build' : 'Not drafted yet', tone: 'wait' };
   return [
     { label: 'My review', ...review, tab: 'review' },
     {
       label: 'My threads',
       value: `${open.length} open`,
       sub: `${answered} answered by the author${replies ? ` · ${replies} with a reply in the draft` : ''}`,
+      tone: answered ? 'action' : open.length ? 'wait' : 'ok',
       tab: 'review',
     },
     {

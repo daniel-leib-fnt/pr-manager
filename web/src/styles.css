@@ -550,9 +550,6 @@ label select {
 .dot.bad {
   background: var(--gh-failure);
 }
-.dot.idle {
-  background: var(--border-strong);
-}
 .card-head {
   display: flex;
   align-items: center;

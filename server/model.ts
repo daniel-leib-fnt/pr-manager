@@ -279,12 +279,14 @@ export interface SummaryFields {
   nudge: boolean;
   /** Unchecked task lines that pr-manager knows of: checklist lines of comments on the PR not yet checked off, and my open final review. */
   openTasks: number;
+  /** The `autonomy` setting applies to this PR: the agent decides alone and reports in my final review. Always false for reviews. */
+  autonomy: boolean;
 }
 
 /** The part of the summary that each role computes. */
 export type RoleSummary = Pick<
   SummaryFields,
-  'waitingForBuild' | 'noBuild' | 'batch' | 'openThreads' | 'waitingSince' | 'nudge' | 'openTasks'
+  'waitingForBuild' | 'noBuild' | 'batch' | 'openThreads' | 'waitingSince' | 'nudge' | 'openTasks' | 'autonomy'
 >;
 
 export type OwnPrSummary = OwnPr & SummaryFields;
