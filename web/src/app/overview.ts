@@ -1,7 +1,7 @@
 import { Component, ElementRef, computed, effect, inject, signal, viewChild } from '@angular/core';
 import { Router, RouterLink, RouterLinkActive } from '@angular/router';
 import { Api, type Group, type Pr } from './api';
-import { Ci } from './ci';
+import { Ci } from './components/ci';
 import { setFaviconBadge } from './favicon';
 import { nextStep } from './pr-view';
 

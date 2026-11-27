@@ -1,20 +1,48 @@
 import { DatePipe, NgTemplateOutlet } from '@angular/common';
 import { Component, computed, effect, inject, input, signal, viewChild } from '@angular/core';
-import { FormsModule } from '@angular/forms';
 import { Api, type PrDetail } from './api';
-import { Ci } from './ci';
+import { DetailsPanel } from './components/details-panel';
+import { InstructionBox } from './components/instruction-box';
+import { NeedsMe } from './components/needs-me';
 import { OwnPr } from './own-pr';
-import { type ActionRequest, ROLE_LABEL, type RoleRegions, emptyDraft, loadDraft, plural, saveDraft } from './pr-view';
+import {
+  type ActionRequest,
+  type NeedsItem,
+  ROLE_LABEL,
+  type RoleRegions,
+  agentTile,
+  buildTile,
+  emptyDraft,
+  loadDraft,
+  plural,
+  saveDraft,
+} from './pr-view';
 import { ReviewPr } from './review-pr';
+import { StatusTiles } from './components/status-tiles';
+import { SummaryCard } from './components/summary-card';
 import { Transcript } from './transcript';
+import { WorkList } from './components/work-list';
 
 /**
- * The frame every PR page shares: header, tabs, summary, activity, transcript and the instruction box. What
- * belongs to one role lives in its component (`own-pr.ts`, `review-pr.ts`), which fills the regions below.
+ * The frame every PR page shares: header, tabs, Overview, activity, transcript and the instruction box. What
+ * belongs to one role lives in its component (`own-pr.ts`, `review-pr.ts`), which fills its tabs and gives the
+ * Overview its tiles and to-dos.
  */
 @Component({
   selector: 'app-pr-page',
-  imports: [FormsModule, DatePipe, NgTemplateOutlet, Transcript, Ci, OwnPr, ReviewPr],
+  imports: [
+    DatePipe,
+    NgTemplateOutlet,
+    Transcript,
+    OwnPr,
+    ReviewPr,
+    StatusTiles,
+    NeedsMe,
+    SummaryCard,
+    WorkList,
+    DetailsPanel,
+    InstructionBox,
+  ],
   template: `
     @if (data(); as d) {
       <!-- The role component comes first: the regions below render its templates, which read its inputs, so the
@@ -28,6 +56,7 @@ import { Transcript } from './transcript';
           [busy]="busy()"
           (changed)="persist()"
           (action)="request($event)"
+          (openTab)="tab.set($event)"
         />
       } @else {
         <app-review-pr
@@ -38,203 +67,151 @@ import { Transcript } from './transcript';
           [busy]="busy()"
           (changed)="persist()"
           (action)="request($event)"
-          (openSummary)="tab.set('summary')"
         />
       }
 
-      <header class="pr-header">
-        <div class="page">
-          <div class="pr-head-row">
-            <div class="pr-head-main">
-              <div class="tag-row">
-                <span class="tag" [class]="d.pr.role">{{ roleLabel[d.pr.role] }}</span>
-                <app-ci [state]="d.pr.check_state" [tag]="true" />
-                <ng-container *ngTemplateOutlet="region('tags')" />
-                @if (d.pr.is_draft) {
-                  <span class="tag">Draft</span>
-                }
-                @if (d.pr.state !== 'open') {
-                  <span class="tag">{{ d.pr.state }}</span>
-                }
-              </div>
-              <h1>{{ d.pr.title }}</h1>
-              <div class="meta">
-                <ng-container *ngTemplateOutlet="region('meta')" />
-                <span class="ref">{{ d.pr.head_ref }} → {{ d.pr.base_ref }}</span>
-                @if (d.pr.worktree) {
-                  <span class="ref">{{ d.pr.worktree }}</span>
-                }
-                <a [href]="d.pr.url" target="_blank" rel="noopener">{{ d.pr.repo }}#{{ d.pr.number }} ↗</a>
-              </div>
-            </div>
-            <div class="actions">
-              @if (d.pr.paused) {
-                <button (click)="act('resume')">Resume agent</button>
-              } @else {
-                <button (click)="act('pause')">Pause agent</button>
-              }
-              @if (d.pr.role === 'review' && d.pr.ignored) {
-                <button (click)="act('unignore')">Stop ignoring</button>
-              } @else if (d.pr.role === 'review' && d.pr.state === 'open') {
-                <button (click)="act('ignore')">Ignore review</button>
-              }
-              @if (moreActions()) {
-                <button aria-label="More actions" [attr.aria-expanded]="menuOpen()" (click)="menuOpen.set(!menuOpen())">
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-                    <circle cx="5" cy="12" r="1.8" />
-                    <circle cx="12" cy="12" r="1.8" />
-                    <circle cx="19" cy="12" r="1.8" />
-                  </svg>
-                </button>
-                @if (menuOpen()) {
-                  <div class="menu" role="menu">
-                    @if (d.pr.role === 'review') {
-                      <button role="menuitem" (click)="act('followup-review')">Review again</button>
-                    } @else if (d.pr.counts.proposals || d.pr.counts.questions) {
-                      <button role="menuitem" (click)="act('followup-review')">Check open items again</button>
-                    }
-                    @if (d.pr.session_id && !d.pr.agent_running) {
-                      <button role="menuitem" (click)="confirmAct('reset-session', 'Start a fresh agent session for this PR?')">
-                        Reset session
-                      </button>
-                    }
-                    @if (d.pr.state === 'closed') {
-                      <button role="menuitem" (click)="confirmAct('remove-worktree', 'Remove the worktree of this closed PR?')">
-                        Remove worktree
-                      </button>
-                    }
-                  </div>
-                }
-              }
-            </div>
-          </div>
-          @if (d.pr.blocked) {
-            <div class="banner error">
-              <strong>Blocked.</strong>
-              {{ d.pr.blocked }}
-              <button class="small" (click)="act('unblock')">Retry</button>
-            </div>
-          }
-          <ng-container *ngTemplateOutlet="region('bannersEarly')" />
-          @if (d.pr.kept) {
-            <div class="banner">The worktree was kept: {{ d.pr.kept }}</div>
-          }
-          @if (d.pr.ignored) {
-            <div class="banner">This review is ignored. The agent does nothing here and sends no notifications.</div>
-          }
-          @if (d.pr.paused) {
-            <div class="banner">The agent is paused for this PR. GitHub activity is still collected.</div>
-          }
-          @if (d.pr.waitingForBuild) {
-            <div class="banner">The review waits until the build is successful.</div>
-          }
-          <ng-container *ngTemplateOutlet="region('bannersLate')" />
-          @for (f of openFollowUps(); track f.id) {
-            <div class="banner" [class.info]="f.severity === 'info'">
-              <strong>{{ f.severity === 'info' ? 'Note from the agent' : 'Follow-up from the agent' }}</strong>
-              <span class="small">{{ f.created_at | date: 'dd.MM. HH:mm' }}:</span>
-              <span class="pre">{{ f.text }}</span>
-              <button class="small" (click)="request({ name: 'follow-up-done', body: { id: f.id } })">
-                {{ f.severity === 'info' ? 'Dismiss' : 'Done' }}
-              </button>
-            </div>
-          }
-          @if (error()) {
-            <div class="banner error">{{ error() }}</div>
-          }
-          <nav class="tabs" aria-label="Sections">
-            <button class="tab" [class.on]="tab() === 'main'" (click)="tab.set('main')">
-              <ng-container *ngTemplateOutlet="region('tabLabel')" />
-            </button>
-            <button class="tab" [class.on]="tab() === 'summary'" (click)="tab.set('summary')">Summary</button>
-            <button class="tab" [class.on]="tab() === 'activity'" (click)="tab.set('activity')">Activity</button>
-            <button class="tab" [class.on]="tab() === 'transcript'" (click)="tab.set('transcript')">
-              Agent transcript
-              @if (d.pr.agent_running) {
-                <span class="tag small info">working</span>
-              }
-            </button>
-          </nav>
-        </div>
-      </header>
-
-      <div class="page pr-body">
-        <div class="main-col">
-          @switch (tab()) {
-            @case ('main') {
-              <ng-container *ngTemplateOutlet="region('main')" />
-            }
-            @case ('summary') {
-              <section class="card">
-                <h2>Summary</h2>
-                <p class="pre">{{ d.pr.summary || 'No summary yet.' }}</p>
-              </section>
-            }
-            @case ('activity') {
-              <section class="card">
-                <h2>Activity</h2>
-                <ul class="items">
-                  @for (w of d.work.slice().reverse(); track w.id) {
-                    <li>
-                      <span class="chip" [class.error]="w.state === 'failed'" [class.live]="w.state === 'in_progress'">{{ w.state }}</span>
-                      {{ w.kind }} · {{ w.created_at | date: 'dd.MM. HH:mm' }}
-                      @if (w.error) {
-                        <div class="error-text">{{ w.error }}</div>
-                      }
-                    </li>
-                  } @empty {
-                    <li class="muted">Nothing yet.</li>
+      <!-- Everything below reads the role's signals (tabs, tiles, to-dos), which read its inputs. Those are bound when
+           the role's own embedded view is checked, after this view's bindings; an embedded view declared after it is
+           checked later, so the reads find the inputs set. -->
+      @if (role()) {
+        <header class="pr-header">
+          <div class="page">
+            <div class="pr-head-row">
+              <div class="pr-head-main">
+                <div class="tag-row">
+                  <span class="tag" [class]="d.pr.role">{{ roleLabel[d.pr.role] }}</span>
+                  <ng-container *ngTemplateOutlet="region('tags')" />
+                  @if (d.pr.is_draft) {
+                    <span class="tag">Draft</span>
                   }
-                </ul>
-              </section>
-            }
-            @case ('transcript') {
-              <section class="card">
-                <h2>Agent transcript</h2>
-                <app-transcript [prId]="d.pr.id" [sessionId]="d.pr.session_id" />
-              </section>
-            }
-          }
-        </div>
-
-        <aside class="side-col">
-          <ng-container *ngTemplateOutlet="region('side')" />
-
-          <section class="card panel">
-            <h2>Instruction to the agent</h2>
-            <textarea
-              rows="3"
-              placeholder="Tell the agent what to do on this PR"
-              [(ngModel)]="draft().instruction"
-              (ngModelChange)="persist()"
-              (keydown.control.enter)="instruct()"
-              (keydown.meta.enter)="instruct()"
-            ></textarea>
-            <div class="send-row">
-              <span>
-                <span class="kbd">Ctrl</span>
-                +
-                <span class="kbd">Enter</span>
-                sends
-              </span>
-              <button (click)="instruct()" [disabled]="!draft().instruction.trim() || busy()">Send instruction</button>
+                  @if (d.pr.state !== 'open') {
+                    <span class="tag">{{ d.pr.state }}</span>
+                  }
+                  @if (d.pr.paused) {
+                    <span class="tag">Paused</span>
+                  }
+                  @if (d.pr.ignored) {
+                    <span class="tag">Ignored</span>
+                  }
+                </div>
+                <h1>{{ d.pr.title }}</h1>
+                <div class="meta">
+                  <ng-container *ngTemplateOutlet="region('meta')" />
+                  <a [href]="d.pr.url" target="_blank" rel="noopener">{{ d.pr.repo }}#{{ d.pr.number }} ↗</a>
+                  @if (d.pr.gh_updated_at) {
+                    <span>updated {{ d.pr.gh_updated_at | date: 'dd.MM. HH:mm' }}</span>
+                  }
+                </div>
+              </div>
+              <div class="actions">
+                @if (d.pr.paused) {
+                  <button (click)="act('resume')">Resume agent</button>
+                } @else {
+                  <button (click)="act('pause')">Pause agent</button>
+                }
+                @if (d.pr.role === 'review' && d.pr.ignored) {
+                  <button (click)="act('unignore')">Stop ignoring</button>
+                } @else if (d.pr.role === 'review' && d.pr.state === 'open') {
+                  <button (click)="act('ignore')">Ignore review</button>
+                }
+                @if (moreActions()) {
+                  <button aria-label="More actions" [attr.aria-expanded]="menuOpen()" (click)="menuOpen.set(!menuOpen())">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                      <circle cx="5" cy="12" r="1.8" />
+                      <circle cx="12" cy="12" r="1.8" />
+                      <circle cx="19" cy="12" r="1.8" />
+                    </svg>
+                  </button>
+                  @if (menuOpen()) {
+                    <div class="menu" role="menu">
+                      @if (d.pr.role === 'review') {
+                        <button role="menuitem" (click)="act('followup-review')">Review again</button>
+                      } @else if (d.pr.counts.proposals || d.pr.counts.questions) {
+                        <button role="menuitem" (click)="act('followup-review')">Check open items again</button>
+                      }
+                      @if (d.pr.session_id && !d.pr.agent_running) {
+                        <button role="menuitem" (click)="confirmAct('reset-session', 'Start a fresh agent session for this PR?')">
+                          Reset session
+                        </button>
+                      }
+                      @if (d.pr.state === 'closed') {
+                        <button role="menuitem" (click)="confirmAct('remove-worktree', 'Remove the worktree of this closed PR?')">
+                          Remove worktree
+                        </button>
+                      }
+                    </div>
+                  }
+                }
+              </div>
             </div>
-          </section>
-
-          <section class="card panel">
-            <div class="send-row">
-              <span class="live">
-                <span class="dot" [style.background]="d.pr.agent_running ? 'var(--info-dot)' : 'var(--border-strong)'"></span>
-                <strong>{{ d.pr.agent_running ? 'Agent working' : d.pr.paused ? 'Agent paused' : 'Agent idle' }}</strong>
-              </span>
-              @if (lastWork(); as w) {
-                <span>{{ w.kind }} · {{ w.state }} · {{ w.created_at | date: 'dd.MM. HH:mm' }}</span>
+            @if (d.pr.blocked) {
+              <div class="banner error">
+                <strong>Blocked.</strong>
+                {{ d.pr.blocked }}
+                <button class="small" (click)="act('unblock')">Retry</button>
+              </div>
+            }
+            @if (error()) {
+              <div class="banner error">{{ error() }}</div>
+            }
+            <nav class="tabs" aria-label="Sections">
+              <button class="tab" [class.on]="tab() === 'overview'" (click)="tab.set('overview')">Overview</button>
+              @for (t of roleTabs(); track t.id) {
+                <button class="tab" [class.on]="tab() === t.id" (click)="tab.set(t.id)">
+                  {{ t.label }}
+                  @if (t.badge) {
+                    <span class="tag small" [class]="t.badgeClass ?? ''">{{ t.badge }}</span>
+                  }
+                </button>
               }
-            </div>
-            <button class="link" (click)="tab.set('transcript')">Open transcript</button>
-          </section>
-        </aside>
-      </div>
+              <button class="tab" [class.on]="tab() === 'activity'" (click)="tab.set('activity')">Activity</button>
+              <button class="tab" [class.on]="tab() === 'transcript'" (click)="tab.set('transcript')">
+                Agent transcript
+                @if (d.pr.agent_running) {
+                  <span class="tag small info">working</span>
+                }
+              </button>
+            </nav>
+          </div>
+        </header>
+
+        <div class="page pr-body">
+          @if (tab() === 'overview') {
+            <app-status-tiles [tiles]="tiles()" (openTab)="tab.set($event)" />
+          }
+          <div class="main-col">
+            @switch (tab()) {
+              @case ('overview') {
+                <app-needs-me [items]="needs()" [busy]="busy()" (action)="request($event)" (openTab)="tab.set($event)" />
+                <app-summary-card [title]="role()?.summaryTitle ?? 'Summary'" [text]="d.pr.summary" />
+                @if (role()?.recentActivity) {
+                  <app-work-list title="Recent activity" [work]="d.work" [limit]="4" (showAll)="tab.set('activity')" />
+                }
+              }
+              @case ('activity') {
+                <app-work-list title="Activity" [work]="d.work" />
+              }
+              @case ('transcript') {
+                <section class="card">
+                  <h2>Agent transcript</h2>
+                  <app-transcript [prId]="d.pr.id" [sessionId]="d.pr.session_id" />
+                </section>
+              }
+              @default {
+                <ng-container *ngTemplateOutlet="roleTab()?.main ?? null" />
+              }
+            }
+          </div>
+
+          <aside class="side-col">
+            <ng-container *ngTemplateOutlet="roleTab()?.side ?? null" />
+            <app-instruction-box [draft]="draft()" [busy]="busy()" (changed)="persist()" (send)="instruct()" />
+            @if (tab() === 'overview') {
+              <app-details-panel [pr]="d.pr" [lastRun]="lastRun()" [push]="role()?.push?.() ?? null" />
+            }
+          </aside>
+        </div>
+      }
     } @else {
       <p class="muted page">Loading…</p>
     }
@@ -249,7 +226,7 @@ export class PrPage {
   protected readonly draft = signal(emptyDraft());
   protected readonly busy = signal(false);
   protected readonly error = signal<string | null>(null);
-  protected readonly tab = signal<'main' | 'summary' | 'activity' | 'transcript'>('main');
+  protected readonly tab = signal<string>('overview');
   protected readonly menuOpen = signal(false);
 
   private readonly prId = computed(() => Number(this.id()));
@@ -257,16 +234,33 @@ export class PrPage {
   /** The component of the PR's role; it fills the regions of this page. */
   private readonly own = viewChild(OwnPr);
   private readonly review = viewChild(ReviewPr);
-  private readonly role = computed<RoleRegions | undefined>(() => this.own() ?? this.review());
+  protected readonly role = computed<RoleRegions | undefined>(() => this.own() ?? this.review());
 
-  protected readonly lastWork = computed(() => this.data()?.work.at(-1) ?? null);
-  /** What the agent left me to do or check, until I tick it off. */
-  protected readonly openFollowUps = computed(
-    () =>
-      this.data()
-        ?.followUps.filter((f) => f.state === 'open')
-        .sort((a, b) => Number(b.severity === 'action') - Number(a.severity === 'action')) ?? [],
+  protected readonly roleTabs = computed(() => this.role()?.tabs() ?? []);
+  /** The tab of the role that is showing, if the current one is not a tab of the frame. */
+  protected readonly roleTab = computed(() => this.roleTabs().find((t) => t.id === this.tab()) ?? null);
+  /** The latest work item that started; `findLast` is not in the compile target. */
+  protected readonly lastRun = computed(() => [...(this.data()?.work ?? [])].reverse().find((w) => w.started_at) ?? null);
+  /** Build, the role's tiles, Agent. */
+  protected readonly tiles = computed(() => {
+    const d = this.data();
+    return d ? [buildTile(d.pr), ...(this.role()?.tiles() ?? []), agentTile(d.pr, this.lastRun())] : [];
+  });
+  /** What the agent left me to do or check, until I tick it off; to-dos before notes. */
+  private readonly followUps = computed<NeedsItem[]>(() =>
+    (this.data()?.followUps ?? [])
+      .filter((f) => f.state === 'open')
+      .sort((a, b) => Number(b.severity === 'action') - Number(a.severity === 'action'))
+      .map((f) => ({
+        key: `follow-up-${f.id}`,
+        title: f.severity === 'info' ? 'Note from the agent' : 'Follow-up from the agent',
+        at: f.created_at,
+        text: f.text,
+        tone: f.severity === 'info' ? 'info' : 'warn',
+        actions: [{ label: f.severity === 'info' ? 'Dismiss' : 'Done', request: { name: 'follow-up-done', body: { id: f.id } } }],
+      })),
   );
+  protected readonly needs = computed(() => [...(this.role()?.needs() ?? []), ...this.followUps()]);
   protected readonly moreActions = computed(() => {
     const pr = this.data()?.pr;
     return (
@@ -280,7 +274,7 @@ export class PrPage {
       const id = this.prId();
       this.data.set(null);
       this.draft.set(loadDraft(id));
-      this.tab.set('main');
+      this.tab.set('overview');
       this.menuOpen.set(false);
     });
     effect(() => {
@@ -296,7 +290,7 @@ export class PrPage {
   }
 
   /** A region of the role component, or nothing while it is not there yet. */
-  protected region(name: keyof RoleRegions) {
+  protected region(name: 'tags' | 'meta') {
     return this.role()?.[name]?.() ?? null;
   }
 

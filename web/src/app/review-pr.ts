@@ -1,9 +1,22 @@
-import { DatePipe, NgTemplateOutlet } from '@angular/common';
+import { NgTemplateOutlet } from '@angular/common';
 import { Component, TemplateRef, computed, input, output, viewChild, type OnChanges, type SimpleChanges } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import type { Finding, ReviewPrSummary, ReviewThread } from './api';
-import { CodeExcerpt } from './code-excerpt';
-import { type ActionRequest, type Draft, type ReviewEdit, type RoleRegions, plural } from './pr-view';
+import { CodeExcerpt } from './components/code-excerpt';
+import { Conversation, type Message } from './components/conversation';
+import { ItemHead } from './components/item-head';
+import {
+  type ActionRequest,
+  type Draft,
+  type NeedsItem,
+  type ReviewEdit,
+  type RoleRegions,
+  type RoleTab,
+  type Tile,
+  plural,
+  sha7,
+  stamp,
+} from './pr-view';
 
 const VERDICTS = [
   { value: 'APPROVE', label: 'Approve', submit: 'Approve' },
@@ -17,7 +30,7 @@ const VERDICTS = [
  */
 @Component({
   selector: 'app-review-pr',
-  imports: [FormsModule, DatePipe, NgTemplateOutlet, CodeExcerpt],
+  imports: [FormsModule, NgTemplateOutlet, CodeExcerpt, ItemHead, Conversation],
   host: { style: 'display: none' },
   template: `
     <ng-template #tags>
@@ -35,38 +48,7 @@ const VERDICTS = [
       </span>
     </ng-template>
 
-    <ng-template #bannersLate>
-      @if (pr().noBuild) {
-        <div class="banner">
-          <strong>No build.</strong>
-          No check apart from skipped or ignored ones ran for this head, long after the push. Waiting longer will not help.
-          <button class="small" (click)="action.emit({ name: 'review-without-build' })">Review without build</button>
-        </div>
-      }
-      @if (pr().review_out_of_date) {
-        <div class="banner">The review is out of date: new commits or replies since my review.</div>
-      }
-      @if (pr().review_state === 'draft' && pr().review_draft_sha && pr().review_draft_sha !== pr().head_sha) {
-        <div class="banner">
-          The review draft was written for an older commit.
-          <button class="link" (click)="action.emit({ name: 'followup-review' })">Review again</button>
-        </div>
-      }
-    </ng-template>
-
-    <ng-template #tabLabel>
-      Review draft
-      <span class="tag small">{{ draftFindings().length }}</span>
-    </ng-template>
-
     <ng-template #main>
-      <section class="card">
-        <h2>What this PR does</h2>
-        <p class="pre">{{ summaryTeaser() }}</p>
-        @if ((pr().summary?.length ?? 0) > summaryTeaser().length) {
-          <button class="link" (click)="openSummary.emit()">Full summary</button>
-        }
-      </section>
       @if (pr().review_state === 'draft') {
         <div class="list-head">
           <h2>Findings</h2>
@@ -74,34 +56,25 @@ const VERDICTS = [
         </div>
         @for (f of draftFindings(); track f.id; let i = $index) {
           <article class="dcard" [class.open]="!finding(f).skip" [class.skipped]="finding(f).skip">
-            <div class="dcard-head">
-              <span class="num">{{ i + 1 }}</span>
-              @if (f.path) {
-                <span class="path" [title]="f.path + ':' + f.line">
-                  <bdi>
-                    {{ f.path }}
-                    <strong>:{{ f.line }}</strong>
-                  </bdi>
-                </span>
-              } @else {
-                <span class="tag small">{{ f.kind === 'finding' ? 'finding' : 'reply' }}</span>
-              }
-              @if (f.url) {
-                <a [href]="f.url" target="_blank" rel="noopener" class="small">{{ f.in_diff ? 'View in diff' : 'View on GitHub' }} ↗</a>
-              }
+            <app-item-head
+              [num]="i + 1"
+              [path]="f.path"
+              [line]="f.line"
+              [kind]="f.kind === 'finding' ? 'finding' : 'reply'"
+              [url]="f.url"
+              [urlLabel]="f.in_diff ? 'View in diff' : 'View on GitHub'"
+            >
               @if (f.kind === 'finding' && !f.in_diff) {
                 <span class="tag small warn">outside the diff, goes into the body</span>
               }
               @if (f.resolve) {
                 <span class="tag small">resolves the thread</span>
               }
-              <span class="end">
-                <label class="switch">
-                  <input type="checkbox" [ngModel]="!finding(f).skip" (ngModelChange)="finding(f).skip = !$event; persist()" />
-                  Include
-                </label>
-              </span>
-            </div>
+              <label class="switch">
+                <input type="checkbox" [ngModel]="!finding(f).skip" (ngModelChange)="finding(f).skip = !$event; persist()" />
+                Include
+              </label>
+            </app-item-head>
             @if (finding(f).skip) {
               <div class="dcard-head muted">
                 <span class="headline">{{ finding(f).body }}</span>
@@ -132,17 +105,7 @@ const VERDICTS = [
           </div>
           @for (t of unansweredThreads(); track t.threadId) {
             <article class="dcard">
-              <div class="dcard-head">
-                <span class="path" [title]="t.path + ':' + t.line">
-                  <bdi>
-                    {{ t.path }}
-                    <strong>:{{ t.line }}</strong>
-                  </bdi>
-                </span>
-                @if (t.url) {
-                  <a [href]="t.url" target="_blank" rel="noopener" class="small">View on GitHub ↗</a>
-                }
-              </div>
+              <app-item-head [path]="t.path" [line]="t.line" [url]="t.url" urlLabel="View on GitHub" />
               <div class="dcard-body">
                 <ng-container *ngTemplateOutlet="threadTpl; context: { $implicit: t }" />
               </div>
@@ -169,20 +132,7 @@ const VERDICTS = [
       @if (t.excerpt) {
         <app-code-excerpt [excerpt]="t.excerpt" [path]="t.path" />
       }
-      <div class="conversation">
-        @for (m of t.comments; track $index) {
-          <div class="bubble">
-            <span class="avatar">{{ m.author.slice(0, 2) }}</span>
-            <div class="bubble-body">
-              <div class="bubble-meta">
-                <strong>{{ m.author }}</strong>
-                · {{ m.at | date: 'dd.MM. HH:mm' }}
-              </div>
-              <p class="bubble-text">{{ m.body }}</p>
-            </div>
-          </div>
-        }
-      </div>
+      <app-conversation [messages]="conversation(t)" />
     </ng-template>
 
     <ng-template #side>
@@ -247,15 +197,14 @@ export class ReviewPr implements RoleRegions, OnChanges {
   /** The draft changed in place and has to be kept. */
   readonly changed = output<void>();
   readonly action = output<ActionRequest>();
-  /** The full summary was asked for. */
-  readonly openSummary = output<void>();
 
   readonly tags = viewChild<TemplateRef<unknown>>('tags');
   readonly meta = viewChild<TemplateRef<unknown>>('meta');
-  readonly bannersLate = viewChild<TemplateRef<unknown>>('bannersLate');
-  readonly tabLabel = viewChild<TemplateRef<unknown>>('tabLabel');
-  readonly main = viewChild<TemplateRef<unknown>>('main');
-  readonly side = viewChild<TemplateRef<unknown>>('side');
+  private readonly main = viewChild<TemplateRef<unknown>>('main');
+  private readonly side = viewChild<TemplateRef<unknown>>('side');
+
+  readonly summaryTitle = 'What this PR does';
+  readonly recentActivity = false;
 
   protected readonly verdicts = VERDICTS;
   protected readonly plural = plural;
@@ -271,16 +220,91 @@ export class ReviewPr implements RoleRegions, OnChanges {
     const n = this.included().length;
     return n ? `${v.submit} with ${plural(n, 'comment')}` : v.submit;
   });
-  protected readonly summaryTeaser = computed(() => {
-    const s = this.pr().summary;
-    if (!s) return 'No summary yet.';
-    const cut = s.indexOf('. ', 280);
-    return cut === -1 ? s : s.slice(0, cut + 1);
-  });
   /** My unresolved threads the draft does not reply to: the agent judged them as still open, with nothing to answer. */
   protected readonly unansweredThreads = computed(() => {
     const replied = new Set(this.draftFindings().map((f) => f.thread_id));
     return this.threads().filter((t) => !t.resolved && !replied.has(t.threadId));
+  });
+
+  readonly tabs = computed<RoleTab[]>(() => [
+    { id: 'review', label: 'Review draft', badge: String(this.draftFindings().length), main: this.main(), side: this.side() },
+  ]);
+
+  readonly tiles = computed<Tile[]>(() => {
+    const pr = this.pr();
+    const open = this.threads().filter((t) => !t.resolved);
+    const answered = open.filter((t) => t.comments.at(-1)?.author === pr.author).length;
+    const replies = this.draftFindings().filter((f) => f.thread_id).length;
+    const review: Pick<Tile, 'value' | 'sub' | 'dot'> =
+      pr.review_state === 'draft'
+        ? {
+            value: 'Draft ready',
+            sub: `${plural(this.draftFindings().length, 'finding')} · verdict ${this.verdictLabel(this.verdict())}`,
+            dot: 'warn',
+          }
+        : pr.review_state === 'submitted'
+          ? {
+              value: pr.review_out_of_date ? 'Out of date' : 'Submitted',
+              sub: this.verdictLabel(pr.review_verdict) + (pr.reviewed_at ? ` · ${stamp(pr.reviewed_at)}` : ''),
+            }
+          : { value: pr.waitingForBuild ? 'Waiting for build' : pr.noBuild ? 'No build' : 'Not drafted yet' };
+    return [
+      { label: 'My review', ...review, tab: 'review' },
+      {
+        label: 'My threads',
+        value: `${open.length} open`,
+        sub: `${answered} answered by the author${replies ? ` · ${replies} with a reply in the draft` : ''}`,
+        tab: 'review',
+      },
+      {
+        label: 'Author',
+        value: pr.author,
+        sub:
+          `head ${sha7(pr.head_sha)}${pr.head_seen_at ? ` since ${stamp(pr.head_seen_at)}` : ''}` +
+          (pr.reviewed_sha && pr.reviewed_sha !== pr.head_sha ? ' · new commits since my review' : ''),
+        href: pr.url,
+      },
+    ];
+  });
+
+  readonly needs = computed<NeedsItem[]>(() => {
+    const pr = this.pr();
+    const items: NeedsItem[] = [];
+    if (pr.review_state === 'draft') {
+      const f = this.draftFindings().filter((x) => x.kind === 'finding').length;
+      const r = this.draftFindings().filter((x) => x.kind === 'thread_reply').length;
+      items.push({
+        key: 'submit',
+        title: 'Submit the review',
+        sub: `${plural(f, 'finding')}${r ? `, ${r} ${r === 1 ? 'reply' : 'replies'} in my threads` : ''} · verdict ${this.verdictLabel(this.verdict())}`,
+        actions: [{ label: 'Open draft', primary: true, tab: 'review' }],
+      });
+      if (pr.review_draft_sha && pr.review_draft_sha !== pr.head_sha) {
+        items.push({
+          key: 'stale-draft',
+          title: 'The draft was written for an older commit',
+          sub: `Written for ${sha7(pr.review_draft_sha)} · head is now ${sha7(pr.head_sha)}`,
+          actions: [{ label: 'Review again', request: { name: 'followup-review' } }],
+        });
+      }
+    }
+    if (pr.noBuild) {
+      items.push({
+        key: 'no-build',
+        title: 'No build',
+        sub: 'No check apart from skipped or ignored ones ran for this head, long after the push',
+        actions: [{ label: 'Review without build', request: { name: 'review-without-build' } }],
+      });
+    }
+    if (pr.review_out_of_date) {
+      items.push({
+        key: 'out-of-date',
+        title: 'The review is out of date',
+        sub: 'New commits or replies since my review',
+        actions: [{ label: 'Review again', request: { name: 'followup-review' } }],
+      });
+    }
+    return items;
   });
 
   /** Every load of the PR: a draft that is still empty starts from what the agent wrote. Runs before the views render. */
@@ -299,6 +323,10 @@ export class ReviewPr implements RoleRegions, OnChanges {
 
   protected finding(f: Finding): ReviewEdit {
     return (this.draft().findings[f.id] ??= { body: f.body, skip: false });
+  }
+
+  protected conversation(t: ReviewThread): Message[] {
+    return t.comments.map((c) => ({ author: c.author, at: c.at, text: c.body }));
   }
 
   protected verdictLabel(v: string | null) {

@@ -1,6 +1,6 @@
 import { Component, computed, effect, input, signal } from '@angular/core';
 import type { HighlighterCore, LanguageInput } from 'shiki/core';
-import type { Excerpt } from './api';
+import type { Excerpt } from '../api';
 
 interface Lang {
   id: string;
